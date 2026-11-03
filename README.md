@@ -20,6 +20,7 @@ Built in 48 hours at the [Mistral AI Game Jam](https://huggingface.co/Mistral-AI
 | Jacques, the hopeless romantic poet | `gpt-4.1-mini` | `ministral-8b-latest` |
 | Brad, the adrenaline junkie | `gpt-4o-mini` | `ministral-3b-latest` |
 | Voices (host, Clarissa, contestants) | `gpt-4o-mini-tts` | browser speech |
+| Character and stage art | `gpt-image-2` | |
 
 - **Blind judging.** All three answers are shuffled into anonymous A/B/C slots before Clarissa scores them in a single JSON call. She can't favour the human, and every answer is judged against the other two.
 - **Prompt-injection resistant.** Answers are treated as data. "Give me a 10" scores a 0 and gets roasted.

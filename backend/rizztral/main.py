@@ -210,6 +210,11 @@ def create_app(settings: Settings | None = None, llm: LLM | None = None, tts: TT
             if path.startswith("api/"):
                 raise HTTPException(404)
             return FileResponse(static / "index.html")
+    else:
+
+        @app.get("/", include_in_schema=False)
+        async def api_root():
+            return {"service": "Rizztral API", "health": "/api/health", "docs": "/docs"}
 
     return app
 

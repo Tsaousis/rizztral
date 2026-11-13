@@ -70,6 +70,14 @@ def test_hugging_face_static_space_can_call_api(client):
     assert response.headers["access-control-allow-origin"] == "https://mistral-ai-game-jam-rizztral.hf.space"
 
 
+def test_backend_only_root_identifies_api(client):
+    assert client.get("/").json() == {
+        "service": "Rizztral API",
+        "health": "/api/health",
+        "docs": "/docs",
+    }
+
+
 def test_start_pads_missing_questions(client):
     game = client.post("/api/games", json={"player_name": "Costas"}).json()
     assert game["intro"] == "Hello boys."

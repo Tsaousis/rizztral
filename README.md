@@ -63,8 +63,11 @@ and the leaderboard ranks a very niche skill: who has the most rizz, humans or m
   comma-separated; Mistral default `ministral-8b-latest`, `ministral-3b-latest`,
   `mistral-small-latest`, `open-mistral-nemo`). Shows where the AI provider answered every call
   count towards the live AI models leaderboard; built-in-show games never do.
-- Voice is off by default. The original Game Jam build used ElevenLabs; this version only speaks
-  through OpenAI TTS when an `OPENAI_API_KEY` is set, otherwise the cast speaks in text.
+- Voice is off by default. The original Game Jam build used ElevenLabs; this version can speak
+  through OpenAI TTS only when `RIZZTRAL_TTS=1` and an `OPENAI_API_KEY` are set.
+- Spend guard: at most `RIZZTRAL_MAX_AI_GAMES_PER_DAY` shows per day (default `40`, `0` = no cap)
+  use the AI provider; later shows that day play the built-in show. Pair it with a hard spend
+  limit on the provider project.
 
 ## Run locally
 

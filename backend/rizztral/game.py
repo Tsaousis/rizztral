@@ -101,10 +101,25 @@ class GameService:
         self.games: OrderedDict[str, Game] = OrderedDict()
         self.always_offline = settings.demo or offline
         self._provider_down_until = 0.0
+        self._ai_day, self.ai_games_today = "", 0
 
     def offline(self) -> bool:
         """True when the built-in show should run instead of the AI provider."""
         return self.always_offline or time.time() < self._provider_down_until
+
+    def _claim_ai_game(self) -> bool:
+        """Count a new AI-powered show against the daily budget; False once it is spent."""
+        today = features.daily_key()
+        if today != self._ai_day:
+            self._ai_day, self.ai_games_today = today, 0
+        cap = self.settings.max_ai_games_per_day
+        if cap and self.ai_games_today >= cap:
+            return False
+        self.ai_games_today += 1
+        return True
+
+    def _ai(self, game: Game) -> bool:
+        return game.live and not self.offline()
 
     def _mark_provider_down(self) -> None:
         self._provider_down_until = time.time() + PROVIDER_COOLDOWN_SECONDS
@@ -122,7 +137,8 @@ class GameService:
 
     async def start(self, player_name: str, rounds: int | None = None, daily: bool = False) -> Game:
         n = rounds or self.settings.rounds
-        questions, intro, live = None, None, True
+        questions, intro = None, None
+        live = not self.offline() and self._claim_ai_game()
         day = features.daily_key() if daily else None
         rng = features.daily_rng(day) if daily else self.rng
         type_id = rng.choice(sorted(features.TYPES))
@@ -133,7 +149,7 @@ class GameService:
                 f"Welcome to today's challenge, {player_name}. Everyone gets the same questions today, "
                 "so make yours the answer they talk about."
             )
-        elif not self.offline():
+        elif live:
             try:
                 data = await self.llm.json(
                     self.settings.models["clarissa"],
@@ -181,7 +197,7 @@ class GameService:
         return answers[sum(ord(char) for char in question) % len(answers)]
 
     async def _generate_ai_answers(self, game: Game, question: str) -> dict[str, str]:
-        if self.offline():
+        if not self._ai(game):
             game.live = False
             return {cid: self._demo_answer(cid, question) for cid in AI_IDS}
 
@@ -229,7 +245,7 @@ class GameService:
 
     async def _score(self, game: Game, rnd: Round, number: int) -> None:
         answers = {**(rnd.ai_answers or {}), "player": rnd.player_answer or "I don't know."}
-        if not self.offline():
+        if self._ai(game):
             try:
                 await self._judge(rnd, answers, number, len(game.rounds), game.type_id)
                 return
@@ -362,7 +378,7 @@ class GameService:
         best_answer = best.player_answer if winner == "player" else (best.ai_answers or {}).get(winner, "")
         winner_name = game.player_name if winner == "player" else NAMES[winner]
         speech = ""
-        if not self.offline():
+        if self._ai(game):
             try:
                 data = await self.llm.json(
                     self.settings.models["clarissa"],

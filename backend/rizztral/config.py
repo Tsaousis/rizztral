@@ -6,7 +6,7 @@ PROVIDERS = {
     "openai": {
         "base_url": None,
         "key_env": "OPENAI_API_KEY",
-        "models": {"clarissa": "gpt-4.1", "jacques": "gpt-4.1-mini", "brad": "gpt-4o-mini"},
+        "models": {"clarissa": "gpt-4.1-mini", "jacques": "gpt-4.1-mini", "brad": "gpt-4o-mini"},
         "arena": ["gpt-4.1-mini", "gpt-4o-mini", "gpt-4.1-nano"],
     },
     "mistral": {
@@ -46,6 +46,7 @@ class Settings:
     answer_seconds: int = 60
     max_answer_chars: int = 280
     max_games: int = 500
+    max_ai_games_per_day: int = field(default_factory=lambda: int(os.getenv("RIZZTRAL_MAX_AI_GAMES_PER_DAY", "40")))
     db_path: Path = field(
         default_factory=lambda: Path(
             os.getenv("RIZZTRAL_DB", Path(__file__).resolve().parent.parent / "data" / "rizztral.db")
@@ -84,4 +85,4 @@ class Settings:
 
     @property
     def tts_enabled(self) -> bool:
-        return not self.demo and bool(os.getenv("OPENAI_API_KEY")) and os.getenv("RIZZTRAL_TTS", "1") != "0"
+        return not self.demo and bool(os.getenv("OPENAI_API_KEY")) and _enabled("RIZZTRAL_TTS")

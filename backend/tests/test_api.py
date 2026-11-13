@@ -117,6 +117,8 @@ def test_demo_mode_plays_without_provider_key(tmp_path, monkeypatch):
             "demo": True,
             "offline": True,
             "llm_key": False,
+            "ai_games_today": 0,
+            "ai_games_cap": 40,
         }
         gid, game, rounds = play(demo, ["We laugh together on an adventure."] * 3)
         assert game["intro"].startswith("Welcome to the villa")
@@ -288,3 +290,25 @@ def test_secret_type_rewards_matching_answers():
     GameService._demo_judge(typed, "I would take you to dinner under the moon, a place I like.", "poetic")
     assert typed.scores["player"] > plain.scores["player"] or typed.scores["player"] == 10
     assert features.profile(["I'd write you a poem under the stars, my heart is yours"])["title"] == "The Poet"
+
+
+def test_daily_ai_cap_switches_new_shows_to_built_in(tmp_path, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    settings = Settings(db_path=tmp_path / "db.sqlite", static_dir=tmp_path / "none", max_ai_games_per_day=1)
+    llm = FakeLLM()
+    with TestClient(create_app(settings, llm=llm, tts=False)) as c:
+        play(c, ["a fun long answer", "x", "y"])
+        used = len(llm.calls)
+        assert used > 0
+        gid, _, _ = play(c, ["a fun long answer", "x", "y"])
+        assert c.post(f"/api/games/{gid}/verdict").status_code == 200
+        assert len(llm.calls) == used
+        assert c.get("/api/health").json()["ai_games_today"] == 1
+
+
+def test_tts_is_opt_in(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    monkeypatch.delenv("RIZZTRAL_TTS", raising=False)
+    assert Settings().tts_enabled is False
+    monkeypatch.setenv("RIZZTRAL_TTS", "1")
+    assert Settings().tts_enabled is True

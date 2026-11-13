@@ -101,6 +101,8 @@ def create_app(settings: Settings | None = None, llm: LLM | None = None, tts: TT
             "demo": settings.demo,
             "offline": service.offline(),
             "llm_key": bool(settings.api_key),
+            "ai_games_today": service.ai_games_today,
+            "ai_games_cap": settings.max_ai_games_per_day,
         }
 
     @app.get("/api/config")

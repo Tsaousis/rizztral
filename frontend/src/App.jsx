@@ -100,6 +100,8 @@ function Dialog({ speaker, label, text, onSkip, done, children, tone = '' }) {
 function App() {
   const [config, setConfig] = useState({ rounds: 3, round_options: [3, 5], answer_seconds: 60, tts: false })
   const [roundCount, setRoundCount] = useState(5)
+  const [prep, setPrep] = useState(null)
+  const [preStep, setPreStep] = useState(0)
   const [boardTab, setBoardTab] = useState('humans')
   const [phase, setPhase] = useState('lobby')
   const [game, setGame] = useState(null)
@@ -126,6 +128,9 @@ function App() {
   const playerName = name || 'YOU'
   const displayName = (id) => (id === 'player' ? playerName : game?.lineup?.[id]?.name || CAST[id].name)
   const spriteId = (seat) => (seat === 'player' ? 'player' : game?.lineup?.[seat]?.id || seat)
+  const beforeIds = useMemo(() => (prep ? prep.order.slice(0, prep.order.indexOf('player')) : []), [prep])
+  const speakersAfter = prep ? prep.order.slice(prep.order.indexOf('player') + 1) : []
+  const myTurn = phase === 'answering' && Boolean(prep) && (!beforeIds.length || preStep > beforeIds.length)
   const speakerLabel = (speaker) => (CAST[speaker] && speaker !== 'player' ? displayName(speaker) : SPEAKERS[speaker])
 
   useEffect(() => {
@@ -200,15 +205,17 @@ function App() {
     setResult(null)
     setRevealStep(0)
     setPeek(null)
+    setPrep(null)
+    setPreStep(0)
     setWink(false)
     setRewriting(false)
     setSeconds(config.answer_seconds)
     setError('')
     setPhase('answering')
     void speak(game.questions[number - 1], 'clarissa')
-    request(`/games/${game.game_id}/rounds/${number}/prepare`, { method: 'POST' }).catch((err) =>
-      setError(err.message),
-    )
+    request(`/games/${game.game_id}/rounds/${number}/prepare`, { method: 'POST' })
+      .then(setPrep)
+      .catch((err) => setError(err.message))
   }
 
   const submitAnswer = useCallback(
@@ -270,14 +277,14 @@ function App() {
   }
 
   useEffect(() => {
-    if (phase !== 'answering' || busy) return undefined
+    if (phase !== 'answering' || busy || !myTurn) return undefined
     if (seconds <= 0) {
       void submitAnswer("I don't know")
       return undefined
     }
     const timer = window.setTimeout(() => setSeconds((current) => current - 1), 1000)
     return () => window.clearTimeout(timer)
-  }, [busy, phase, seconds, submitAnswer])
+  }, [busy, phase, seconds, submitAnswer, myTurn])
 
   const finishShow = async () => {
     setBusy(true)
@@ -311,27 +318,37 @@ function App() {
   const totalRounds = game?.questions?.length || roundCount
   const board = (boardTab === 'today' ? leaderboard?.today : leaderboard) || {}
   const revealing = phase === 'reveal' && result
-  const revealId = revealing ? REVEAL_ORDER[Math.min(revealStep, REVEAL_ORDER.length - 1)] : null
-  const allRevealed = revealing && revealStep >= REVEAL_ORDER.length - 1
+  const revealOrder = result?.order || REVEAL_ORDER
+  const revealId = revealing ? revealOrder[Math.min(revealStep, revealOrder.length - 1)] : null
+  const allRevealed = revealing && revealStep >= revealOrder.length - 1
+
 
   const advanceReveal = () => {
     if (!revealing) return
     setRewriting(false)
     const gained = result.scores[revealId] + (result.bonus?.[revealId] || 0)
     setTotals((current) => ({ ...current, [revealId]: current[revealId] + gained }))
-    if (revealStep < REVEAL_ORDER.length) setRevealStep((step) => step + 1)
+    if (revealStep < revealOrder.length) setRevealStep((step) => step + 1)
   }
-  const revealDone = revealing && revealStep >= REVEAL_ORDER.length
+  const revealDone = revealing && revealStep >= revealOrder.length
 
   const line = useMemo(() => {
     if (phase === 'lobby') return { speaker: 'marvey', text: LOBBY_LINE }
     if (phase === 'intro') return { speaker: 'clarissa', text: game?.intro }
-    if (phase === 'answering') return { speaker: 'clarissa', text: game?.questions[roundNumber - 1] }
+    if (phase === 'answering') {
+      const question = game?.questions[roundNumber - 1]
+      if (beforeIds.length && preStep > 0 && preStep <= beforeIds.length) {
+        const id = beforeIds[preStep - 1]
+        return { speaker: id, text: prep.before[id] }
+      }
+      if (myTurn && beforeIds.length) return { speaker: 'clarissa', text: `Your turn, ${playerName}. ${question}` }
+      return { speaker: 'clarissa', text: question }
+    }
     if (revealDone) return { speaker: 'thought', text: result.thought || 'All three answers are in. Who is rizzing hardest?' }
     if (revealing) return { speaker: revealId, text: result.answers[revealId] }
     if (phase === 'verdict') return { speaker: 'clarissa', text: verdict?.speech }
     return { speaker: 'marvey', text: '' }
-  }, [phase, game, roundNumber, revealing, revealDone, revealId, result, verdict])
+  }, [phase, game, roundNumber, revealing, revealDone, revealId, result, verdict, beforeIds, preStep, prep, myTurn, playerName])
 
   const typed = useTypewriter(line.text)
   const revealScore = revealing && !revealDone ? result.scores[revealId] : null
@@ -343,8 +360,8 @@ function App() {
   }, [scoreShown, revealScore, revealId])
 
   useEffect(() => {
-    if (phase === 'answering' && seconds > 0 && seconds <= 10) sfx('tick')
-  }, [phase, seconds])
+    if (phase === 'answering' && myTurn && seconds > 0 && seconds <= 10) sfx('tick')
+  }, [phase, seconds, myTurn])
 
   const makeShareCard = async () => {
     const totalsNow = verdict.totals
@@ -487,8 +504,8 @@ function App() {
 
         {phase !== 'lobby' && phase !== 'verdict' && (
           <div className="podiums" aria-label="Contestants">
-            {REVEAL_ORDER.map((id, index) => {
-              const shown = revealing && index < revealStep
+            {REVEAL_ORDER.map((id) => {
+              const shown = revealing && revealOrder.indexOf(id) < revealStep
               const active = revealId === id && !revealDone
               return (
                 <article key={id} className={`podium ${id === 'player' ? 'you' : ''} ${active ? 'active' : ''}`}>
@@ -552,7 +569,15 @@ function App() {
               </div>
             )}
 
-            {phase === 'answering' && (
+            {phase === 'answering' && !myTurn && (
+              <div className="dialog-actions">
+                <button className="pixel-btn" onClick={() => { sfx('click'); setPreStep((step) => step + 1) }} disabled={!prep || !typed.done}>
+                  {!prep ? 'The others are getting ready…' : preStep < beforeIds.length ? `${displayName(beforeIds[preStep])} ▶` : 'Your turn ▶'}
+                </button>
+              </div>
+            )}
+
+            {phase === 'answering' && myTurn && (
               <form className="answer-form" onSubmit={(event) => { event.preventDefault(); void submitAnswer() }}>
                 <textarea
                   value={answer}
@@ -571,7 +596,7 @@ function App() {
                   <p className="peek-card"><b>{displayName(peek.contestant)} will say:</b> “{peek.answer}”</p>
                 )}
                 <div className="powerups" aria-label="Power-ups, one use each per show">
-                  <button type="button" className="power" onClick={peekAnswer} disabled={busy || used.includes('peek')} title="See one AI answer before you write yours">
+                  <button type="button" className="power" onClick={peekAnswer} disabled={busy || used.includes('peek') || !speakersAfter.length} title="See what an AI who speaks after you will say">
                     ◉ Peek
                   </button>
                   <button

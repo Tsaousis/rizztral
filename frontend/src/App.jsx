@@ -100,7 +100,6 @@ function Dialog({ speaker, label, text, onSkip, done, children, tone = '' }) {
 function App() {
   const [config, setConfig] = useState({ rounds: 3, round_options: [3, 5], answer_seconds: 60, tts: false })
   const [roundCount, setRoundCount] = useState(5)
-  const [prep, setPrep] = useState(null)
   const [boardTab, setBoardTab] = useState('humans')
   const [phase, setPhase] = useState('lobby')
   const [game, setGame] = useState(null)
@@ -201,16 +200,15 @@ function App() {
     setResult(null)
     setRevealStep(0)
     setPeek(null)
-    setPrep(null)
     setWink(false)
     setRewriting(false)
     setSeconds(config.answer_seconds)
     setError('')
     setPhase('answering')
     void speak(game.questions[number - 1], 'clarissa')
-    request(`/games/${game.game_id}/rounds/${number}/prepare`, { method: 'POST' })
-      .then(setPrep)
-      .catch((err) => setError(err.message))
+    request(`/games/${game.game_id}/rounds/${number}/prepare`, { method: 'POST' }).catch((err) =>
+      setError(err.message),
+    )
   }
 
   const submitAnswer = useCallback(
@@ -313,19 +311,17 @@ function App() {
   const totalRounds = game?.questions?.length || roundCount
   const board = (boardTab === 'today' ? leaderboard?.today : leaderboard) || {}
   const revealing = phase === 'reveal' && result
-  const revealOrder = result?.order || REVEAL_ORDER
-  const revealId = revealing ? revealOrder[Math.min(revealStep, revealOrder.length - 1)] : null
-  const allRevealed = revealing && revealStep >= revealOrder.length - 1
-  const speakersAfter = prep ? prep.order.slice(prep.order.indexOf('player') + 1) : []
+  const revealId = revealing ? REVEAL_ORDER[Math.min(revealStep, REVEAL_ORDER.length - 1)] : null
+  const allRevealed = revealing && revealStep >= REVEAL_ORDER.length - 1
 
   const advanceReveal = () => {
     if (!revealing) return
     setRewriting(false)
     const gained = result.scores[revealId] + (result.bonus?.[revealId] || 0)
     setTotals((current) => ({ ...current, [revealId]: current[revealId] + gained }))
-    if (revealStep < revealOrder.length) setRevealStep((step) => step + 1)
+    if (revealStep < REVEAL_ORDER.length) setRevealStep((step) => step + 1)
   }
-  const revealDone = revealing && revealStep >= revealOrder.length
+  const revealDone = revealing && revealStep >= REVEAL_ORDER.length
 
   const line = useMemo(() => {
     if (phase === 'lobby') return { speaker: 'marvey', text: LOBBY_LINE }
@@ -491,8 +487,8 @@ function App() {
 
         {phase !== 'lobby' && phase !== 'verdict' && (
           <div className="podiums" aria-label="Contestants">
-            {REVEAL_ORDER.map((id) => {
-              const shown = revealing && revealOrder.indexOf(id) < revealStep
+            {REVEAL_ORDER.map((id, index) => {
+              const shown = revealing && index < revealStep
               const active = revealId === id && !revealDone
               return (
                 <article key={id} className={`podium ${id === 'player' ? 'you' : ''} ${active ? 'active' : ''}`}>
@@ -558,17 +554,6 @@ function App() {
 
             {phase === 'answering' && (
               <form className="answer-form" onSubmit={(event) => { event.preventDefault(); void submitAnswer() }}>
-                <div className="heard" aria-live="polite">
-                  {!prep && <p className="heard-wait">The others are getting ready…</p>}
-                  {prep && (
-                    <p className="speak-order">
-                      Speaking order: {prep.order.map((id) => displayName(id)).join(' → ')}
-                    </p>
-                  )}
-                  {prep && Object.entries(prep.before).map(([id, text]) => (
-                    <p key={id} className="peek-card"><b>{displayName(id)} said:</b> “{text}”</p>
-                  ))}
-                </div>
                 <textarea
                   value={answer}
                   onChange={(event) => setAnswer(event.target.value.slice(0, 280))}
@@ -586,7 +571,7 @@ function App() {
                   <p className="peek-card"><b>{displayName(peek.contestant)} will say:</b> “{peek.answer}”</p>
                 )}
                 <div className="powerups" aria-label="Power-ups, one use each per show">
-                  <button type="button" className="power" onClick={peekAnswer} disabled={busy || used.includes('peek') || !speakersAfter.length} title="See what an AI who speaks after you will say">
+                  <button type="button" className="power" onClick={peekAnswer} disabled={busy || used.includes('peek')} title="See one AI answer before you write yours">
                     ◉ Peek
                   </button>
                   <button

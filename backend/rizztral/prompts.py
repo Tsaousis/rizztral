@@ -74,13 +74,9 @@ def contestant_messages(
     persona: str,
     question: str,
     rival: str = "",
-    transcript: str = "",
-    heard: list[tuple[str, str]] | None = None,
     player_name: str = "the human",
 ) -> list[dict]:
     rival_note = f" Your rivals tonight are {rival} (another AI) and {player_name} (a human)." if rival else ""
-    memory = f"Earlier in the show:\n{transcript}\n" if transcript else ""
-    this_round = "".join(f'{name} just said: "{text}"\n' for name, text in heard or [])
     return [
         {
             "role": "system",
@@ -92,11 +88,10 @@ def contestant_messages(
         {
             "role": "user",
             "content": (
-                f"{memory}{this_round}"
                 f'Clarissa asks: "{question}"\n'
                 "Answer her directly, in character, in at most 25 words: one or two punchy sentences, like a flirty text. "
                 "Sound like a real person, not a chatbot: no metaphor soup, no 'Honestly?' openers. Be funny and cheeky. "
-                "You can call back to or roast what the others said, by name. "
+                "You may throw one light jab at a rival, and in a roast round go all in on roasting them. "
                 "No emojis, no hashtags, no stage directions, no quotation marks around your answer."
             ),
         },

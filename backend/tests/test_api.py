@@ -22,12 +22,11 @@ class FakeLLM:
         self.calls.append(("json", model))
         if "Write your intro" in prompt:
             return {"intro": "Hello boys.", "questions": ["Q1?", "Q2?"]}
-        if "Anonymous contestant answers" in prompt:
-            pairs = re.findall(r'^([A-C]): """(.*?)"""', prompt, flags=re.MULTILINE | re.DOTALL)
-            return {
-                lab: {"score": 1 if text == "I don't know." else min(10, len(text) // 2), "reaction": f"re {lab}"}
-                for lab, text in pairs
-            }
+        if "A contestant just answered" in prompt:
+            text = re.search(r'"""(.*?)"""', prompt, flags=re.DOTALL).group(1)
+            return {"score": 1 if text == "I don't know." else min(10, len(text) // 2), "reaction": f"re {text[:4]}"}
+        if "Round recap" in prompt:
+            return {"thought": "Loved that one."}
         return {"speech": "You win."}
 
 
@@ -215,21 +214,16 @@ def test_offline_games_do_not_count_for_models(tmp_path, monkeypatch):
         assert c.get("/api/leaderboard").json()["models"] == []
 
 
-def test_judge_thought_names_contestants_not_labels():
-    from rizztral.game import GameService, Round
-
-    class ThoughtLLM:
-        async def json(self, model, messages, temperature=0.7):
-            return {"A": {"score": 5}, "B": {"score": 6}, "C": {"score": 7}, "thought": "A bold [B] beat answer C and Answer [A]."}
-
-    import asyncio
-    import random
-
-    service = GameService(Settings(), ThoughtLLM(), rng=random.Random(0))
-    rnd = Round(question="Q?")
-    asyncio.run(service._judge(rnd, {"jacques": "a", "brad": "b", "player": "c"}, 1, 3))
-    assert rnd.thought.startswith("A bold ")
-    assert "[" not in rnd.thought and "answer C" not in rnd.thought and "Answer" not in rnd.thought
+def test_clarissa_reacts_to_each_answer_as_it_lands(client):
+    gid = client.post("/api/games", json={"player_name": "KOS"}).json()["game_id"]
+    for i in range(1, 4):
+        prep = client.post(f"/api/games/{gid}/rounds/{i}/prepare").json()
+        for turn in prep["before"].values():
+            assert turn["answer"] and isinstance(turn["score"], int) and turn["reaction"].startswith("re ")
+        rnd = client.post(f"/api/games/{gid}/rounds/{i}/answer", json={"answer": "a cheeky answer"}).json()
+        assert set(rnd["scores"]) == {"jacques", "brad", "player"} and rnd["thought"] == "Loved that one."
+        for seat, turn in prep["before"].items():
+            assert rnd["scores"][seat] == turn["score"]
 
 
 def test_powerups_peek_wink_rewrite_once_each(client):

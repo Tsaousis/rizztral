@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import random
-import re
 import secrets
 import time
 from collections import OrderedDict
@@ -14,7 +13,6 @@ from .llm import LLM
 
 PROVIDER_COOLDOWN_SECONDS = 120
 log = logging.getLogger("rizztral")
-NAMES = {c["id"]: c["name"] for c in CONTESTANTS} | {"player": "the human"}
 DEMO_ANSWERS = {
     "jacques": [
         "I would turn it into a tiny poem, then pretend the moon helped me write the good parts.",
@@ -46,6 +44,10 @@ class Round:
     thought: str = ""
     bonus: dict[str, int] = field(default_factory=dict)
     order: list[str] = field(default_factory=lambda: list(ALL_CONTESTANT_IDS))
+
+    @property
+    def done(self) -> bool:
+        return all(cid in self.scores for cid in ALL_CONTESTANT_IDS)
 
     def seats_around_player(self) -> tuple[list[str], list[str]]:
         i = self.order.index("player")
@@ -82,7 +84,7 @@ class Game:
 
     @property
     def finished_rounds(self) -> int:
-        return sum(1 for r in self.rounds if r.scores)
+        return sum(1 for r in self.rounds if r.done)
 
 
 THOUGHTS = {
@@ -284,7 +286,7 @@ class GameService:
         before, _ = rnd.seats_around_player()
         task = game.ai_tasks.get(number)
         if task is None:
-            task = asyncio.ensure_future(self._answer_in_order(game, number, before))
+            task = asyncio.ensure_future(self._play_turns(game, number, before))
             game.ai_tasks[number] = task
         await asyncio.shield(task)
         return {seat: rnd.ai_answers[seat] for seat in before}
@@ -307,108 +309,114 @@ class GameService:
         await self._answer_in_order(game, number, [contestant])
         return {"contestant": contestant, "answer": rnd.ai_answers[contestant]}
 
-    async def _score(self, game: Game, rnd: Round, number: int) -> None:
-        answers = {**(rnd.ai_answers or {}), "player": rnd.player_answer or "I don't know."}
+    async def _play_turns(self, game: Game, number: int, seats: list[str]) -> None:
+        """Each AI speaks in order and Clarissa reacts to them before the next one talks."""
+        rnd = game.rounds[number - 1]
+        for seat in [s for s in rnd.order if s in seats]:
+            await self._answer_in_order(game, number, [seat])
+            if seat not in rnd.scores:
+                await self._judge_one(game, number, seat)
+
+    async def _judge_one(self, game: Game, number: int, seat: str) -> None:
+        rnd = game.rounds[number - 1]
+        text = (rnd.player_answer if seat == "player" else (rnd.ai_answers or {}).get(seat)) or "I don't know."
         if self._ai(game):
             try:
-                await self._judge(rnd, answers, number, len(game.rounds), game.type_id, game.names)
+                data = await self.llm.json(
+                    self.settings.models["clarissa"],
+                    prompts.judge_one_messages(
+                        rnd.question, text, number, len(game.rounds), features.TYPES[game.type_id]["desc"]
+                    ),
+                    temperature=0.6,
+                )
+                rnd.scores[seat] = clamp_score(data.get("score"))
+                rnd.reactions[seat] = str(data.get("reaction") or "Hmm. Next.").strip()
                 return
             except Exception:
                 log.exception("AI provider failed during %s; using the built-in show", "judging")
                 self._mark_provider_down()
         game.live = False
-        self._demo_judge(rnd, rnd.player_answer or "", game.type_id)
+        rnd.scores[seat], rnd.reactions[seat] = self._demo_score(rnd.question, seat, text, game.type_id)
+
+    async def _think(self, game: Game, number: int) -> None:
+        rnd = game.rounds[number - 1]
+        kind = features.TYPES[game.type_id]
+        if self._ai(game):
+            scored = [
+                (game.names[cid], rnd.scores[cid], rnd.player_answer if cid == "player" else rnd.ai_answers[cid])
+                for cid in rnd.order
+            ]
+            try:
+                data = await self.llm.json(
+                    self.settings.models["clarissa"],
+                    prompts.thought_messages(rnd.question, scored, kind["desc"]),
+                    temperature=0.7,
+                )
+                rnd.thought = str(data.get("thought") or "").strip()
+            except Exception:
+                log.exception("AI provider failed during %s; using the built-in show", "thought")
+                self._mark_provider_down()
+        if not rnd.thought:
+            rnd.thought = f"{demo_thought(rnd.scores)} {kind['hint']}"
 
     async def submit(self, game: Game, number: int, answer: str, wink: bool = False) -> Round:
         rnd = self._round(game, number)
         if number != game.finished_rounds + 1:
             raise GameError(409, "Rounds must be played in order.")
         await self.ai_answers(game, number)
-        if rnd.scores:
+        if "player" in rnd.scores:
             return rnd
         if wink:
             self._use_powerup(game, "wink", number)
         rnd.player_answer = answer.strip()[: self.settings.max_answer_chars]
-        await self._answer_in_order(game, number, AI_IDS)
-        await self._score(game, rnd, number)
+        _, after = rnd.seats_around_player()
+        await asyncio.gather(self._judge_one(game, number, "player"), self._play_turns(game, number, after))
+        await self._think(game, number)
         if wink:
             rnd.bonus["player"] = rnd.scores["player"]
         return rnd
 
     async def rewrite(self, game: Game, number: int, answer: str) -> Round:
         rnd = self._round(game, number)
-        if game.verdict or number != game.finished_rounds or not rnd.scores:
+        if game.verdict or number != game.finished_rounds or not rnd.done:
             raise GameError(409, "You can only rewrite the answer you just gave.")
         self._use_powerup(game, "rewrite", number)
-        retry = Round(question=rnd.question, ai_answers=rnd.ai_answers, order=rnd.order)
-        retry.player_answer = answer.strip()[: self.settings.max_answer_chars]
-        await self._score(game, retry, number)
-        rnd.player_answer = retry.player_answer
-        rnd.scores["player"] = retry.scores["player"]
-        rnd.reactions["player"] = retry.reactions["player"]
+        rnd.player_answer = answer.strip()[: self.settings.max_answer_chars]
+        await self._judge_one(game, number, "player")
         if game.powerups.get("wink") == number:
             rnd.bonus["player"] = rnd.scores["player"]
         return rnd
 
-    async def _judge(
-        self, rnd: Round, answers: dict[str, str], number: int, total: int, type_id: str = "funny",
-        names: dict[str, str] | None = None,
-    ) -> None:
-        ids = list(answers)
-        self.rng.shuffle(ids)
-        labels = {chr(ord("A") + i): cid for i, cid in enumerate(ids)}
-        data = await self.llm.json(
-            self.settings.models["clarissa"],
-            prompts.judge_messages(
-                rnd.question,
-                {lab: answers[cid] for lab, cid in labels.items()},
-                number,
-                total,
-                features.TYPES[type_id]["desc"],
-            ),
-            temperature=0.6,
-        )
-        scores, reactions = {}, {}
-        for label, cid in labels.items():
-            entry = data.get(label) if isinstance(data.get(label), dict) else {}
-            scores[cid] = clamp_score(entry.get("score"))
-            raw = str(entry.get("reaction") or "Hmm. Next.").strip()
-            reaction = re.sub(r"\[[A-C]\][,:]?\s*", "", raw).strip()
-            reactions[cid] = reaction[:1].upper() + reaction[1:] if reaction != raw else reaction
-        rnd.scores, rnd.reactions = scores, reactions
-        thought = str(data.get("thought") or "").strip()
-        for label, cid in labels.items():
-            thought = re.sub(
-                rf"(?:\b(?i:answer|contestant|option)\s+)?\[{label}\]|\b(?i:answer|contestant|option)\s+{label}\b",
-                (names or NAMES)[cid],
-                thought,
-            )
-        rnd.thought = thought or demo_thought(scores)
-
     @staticmethod
-    def _demo_judge(rnd: Round, player_answer: str, type_id: str = "funny") -> None:
-        seed = sum(ord(char) for char in rnd.question)
-        word_count = len(player_answer.split())
-        player_score = 1 if not player_answer else min(9, 2 + min(word_count, 15) // 2)
-        if any(word in player_answer.lower() for word in ("laugh", "you", "together", "honest", "adventure")):
-            player_score = min(10, player_score + 1)
-        rnd.scores = {"jacques": 5 + seed % 3, "brad": 5 + (seed // 3) % 3, "player": player_score}
+    def _demo_score(question: str, seat: str, answer: str, type_id: str = "funny") -> tuple[int, str]:
+        seed = sum(ord(char) for char in question)
         kind = features.TYPES[type_id]
-        for cid in kind["fans"]:
-            rnd.scores[cid] = min(10, rnd.scores[cid] + features.TYPE_BONUS)
-        if player_answer and features.matches(type_id, player_answer):
-            rnd.scores["player"] = min(10, rnd.scores["player"] + features.TYPE_BONUS)
-        for contestant_id, score in rnd.scores.items():
-            if score >= 9:
-                reaction = "Okay, that had charm, confidence, and just enough chaos. I like it."
-            elif score >= 7:
-                reaction = "Strong answer. Specific, playful, and dangerously close to impressive."
-            elif score >= 5:
-                reaction = "Not bad, but I wanted one more spark before giving you the rose."
-            else:
-                reaction = "That answer arrived, technically. The chemistry did not."
-            rnd.reactions[contestant_id] = reaction
-        rnd.thought = f"{demo_thought(rnd.scores)} {kind['hint']}"
+        if seat == "player":
+            score = 1 if not answer or answer == "I don't know." else min(9, 2 + min(len(answer.split()), 15) // 2)
+            if any(word in answer.lower() for word in ("laugh", "you", "together", "honest", "adventure")):
+                score = min(10, score + 1)
+            if answer and features.matches(type_id, answer):
+                score = min(10, score + features.TYPE_BONUS)
+        else:
+            score = 5 + (seed % 3 if seat == "jacques" else (seed // 3) % 3)
+            if seat in kind["fans"]:
+                score = min(10, score + features.TYPE_BONUS)
+        if score >= 9:
+            reaction = "Okay, that had charm, confidence, and just enough chaos. I like it."
+        elif score >= 7:
+            reaction = "Strong answer. Specific, playful, and dangerously close to impressive."
+        elif score >= 5:
+            reaction = "Not bad, but I wanted one more spark before giving you the rose."
+        else:
+            reaction = "That answer arrived, technically. The chemistry did not."
+        return score, reaction
+
+    @classmethod
+    def _demo_judge(cls, rnd: Round, player_answer: str, type_id: str = "funny") -> None:
+        for seat in ALL_CONTESTANT_IDS:
+            text = player_answer if seat == "player" else (rnd.ai_answers or {}).get(seat, "")
+            rnd.scores[seat], rnd.reactions[seat] = cls._demo_score(rnd.question, seat, text, type_id)
+        rnd.thought = f"{demo_thought(rnd.scores)} {features.TYPES[type_id]['hint']}"
 
     def winner(self, game: Game) -> str:
         totals = game.totals()

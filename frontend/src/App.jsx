@@ -101,7 +101,7 @@ function App() {
   const [config, setConfig] = useState({ rounds: 3, round_options: [3, 5], answer_seconds: 60, tts: false })
   const [roundCount, setRoundCount] = useState(5)
   const [prep, setPrep] = useState(null)
-  const [preStep, setPreStep] = useState(0)
+  const [step, setStep] = useState(0)
   const [boardTab, setBoardTab] = useState('humans')
   const [phase, setPhase] = useState('lobby')
   const [game, setGame] = useState(null)
@@ -109,9 +109,7 @@ function App() {
   const [answer, setAnswer] = useState('')
   const [seconds, setSeconds] = useState(60)
   const [result, setResult] = useState(null)
-  const [revealStep, setRevealStep] = useState(0)
   const [history, setHistory] = useState([])
-  const [totals, setTotals] = useState({ jacques: 0, brad: 0, player: 0 })
   const [verdict, setVerdict] = useState(null)
   const [leaderboard, setLeaderboard] = useState(null)
   const [busy, setBusy] = useState(false)
@@ -130,7 +128,41 @@ function App() {
   const spriteId = (seat) => (seat === 'player' ? 'player' : game?.lineup?.[seat]?.id || seat)
   const beforeIds = useMemo(() => (prep ? prep.order.slice(0, prep.order.indexOf('player')) : []), [prep])
   const speakersAfter = prep ? prep.order.slice(prep.order.indexOf('player') + 1) : []
-  const myTurn = phase === 'answering' && Boolean(prep) && (!beforeIds.length || preStep > beforeIds.length)
+  const question = game?.questions?.[roundNumber - 1] || ''
+  const beats = useMemo(() => {
+    const list = []
+    if (!prep) return [{ kind: 'ask', speaker: 'clarissa', text: question }]
+    if (beforeIds.length) list.push({ kind: 'ask', speaker: 'clarissa', text: question })
+    beforeIds.forEach((seat) => {
+      const turn = prep.before[seat]
+      list.push({ kind: 'answer', speaker: seat, text: turn.answer })
+      list.push({ kind: 'react', speaker: 'clarissa', seat, score: turn.score, points: turn.score, text: turn.reaction })
+    })
+    list.push({ kind: 'turn', speaker: 'clarissa', text: beforeIds.length ? `Your turn, ${playerName}. ${question}` : question })
+    if (result) {
+      const points = (seat) => result.scores[seat] + (result.bonus?.[seat] || 0)
+      list.push({ kind: 'react', speaker: 'clarissa', seat: 'player', score: result.scores.player, points: points('player'), text: result.reactions.player })
+      result.order.slice(result.order.indexOf('player') + 1).forEach((seat) => {
+        list.push({ kind: 'answer', speaker: seat, text: result.answers[seat] })
+        list.push({ kind: 'react', speaker: 'clarissa', seat, score: result.scores[seat], points: points(seat), text: result.reactions[seat] })
+      })
+      list.push({ kind: 'thought', speaker: 'thought', text: result.thought || 'All three answers are in. Who is rizzing hardest?' })
+    }
+    return list
+  }, [prep, beforeIds, result, question, playerName])
+  const beat = phase === 'answering' || phase === 'reveal' ? beats[Math.min(step, beats.length - 1)] : null
+  const nextBeat = beats[step + 1]
+  const myTurn = phase === 'answering' && beat?.kind === 'turn'
+  const scoredSoFar = beats.slice(0, step + 1).filter((b) => b.kind === 'react')
+  const totals = useMemo(() => {
+    if (verdict) return verdict.totals
+    const sum = { jacques: 0, brad: 0, player: 0 }
+    history.filter((h) => h.round !== roundNumber).forEach((h) => {
+      Object.keys(sum).forEach((id) => { sum[id] += h.scores[id] + (h.bonus?.[id] || 0) })
+    })
+    if (phase === 'answering' || phase === 'reveal') scoredSoFar.forEach((b) => { sum[b.seat] += b.points })
+    return sum
+  }, [verdict, history, roundNumber, phase, scoredSoFar])
   const speakerLabel = (speaker) => (CAST[speaker] && speaker !== 'player' ? displayName(speaker) : SPEAKERS[speaker])
 
   useEffect(() => {
@@ -186,7 +218,6 @@ function App() {
       setPeek(null)
       setWink(false)
       setHistory([])
-      setTotals({ jacques: 0, brad: 0, player: 0 })
       setVerdict(null)
       setResult(null)
       setRoundNumber(0)
@@ -203,10 +234,9 @@ function App() {
     setRoundNumber(number)
     setAnswer('')
     setResult(null)
-    setRevealStep(0)
     setPeek(null)
     setPrep(null)
-    setPreStep(0)
+    setStep(0)
     setWink(false)
     setRewriting(false)
     setSeconds(config.answer_seconds)
@@ -231,7 +261,7 @@ function App() {
         })
         setResult(data)
         setUsed(data.powerups)
-        setRevealStep(0)
+        setStep((current) => current + 1)
         setHistory((current) => [...current, data])
         setPhase('reveal')
       } catch (err) {
@@ -292,7 +322,6 @@ function App() {
     try {
       const data = await request(`/games/${game.game_id}/verdict`, { method: 'POST' })
       setVerdict(data)
-      setTotals(data.totals)
       setPhase('verdict')
       sfx(data.winner === 'player' ? 'rose' : 'lose')
       void speak(data.speech, 'clarissa')
@@ -318,46 +347,38 @@ function App() {
   const totalRounds = game?.questions?.length || roundCount
   const board = (boardTab === 'today' ? leaderboard?.today : leaderboard) || {}
   const revealing = phase === 'reveal' && result
-  const revealOrder = result?.order || REVEAL_ORDER
-  const revealId = revealing ? revealOrder[Math.min(revealStep, revealOrder.length - 1)] : null
-  const allRevealed = revealing && revealStep >= revealOrder.length - 1
-
-
-  const advanceReveal = () => {
-    if (!revealing) return
+  const revealDone = revealing && beat?.kind === 'thought'
+  const advance = () => {
+    sfx('click')
     setRewriting(false)
-    const gained = result.scores[revealId] + (result.bonus?.[revealId] || 0)
-    setTotals((current) => ({ ...current, [revealId]: current[revealId] + gained }))
-    if (revealStep < revealOrder.length) setRevealStep((step) => step + 1)
+    setStep((current) => Math.min(current + 1, beats.length - 1))
   }
-  const revealDone = revealing && revealStep >= revealOrder.length
+  const nextLabel = !nextBeat
+    ? 'The others are getting ready…'
+    : nextBeat.kind === 'answer'
+      ? `${displayName(nextBeat.speaker)} ▶`
+      : nextBeat.kind === 'react'
+        ? 'Clarissa ▶'
+        : nextBeat.kind === 'turn'
+          ? 'Your turn ▶'
+          : 'Her thoughts ▶'
 
   const line = useMemo(() => {
     if (phase === 'lobby') return { speaker: 'marvey', text: LOBBY_LINE }
     if (phase === 'intro') return { speaker: 'clarissa', text: game?.intro }
-    if (phase === 'answering') {
-      const question = game?.questions[roundNumber - 1]
-      if (beforeIds.length && preStep > 0 && preStep <= beforeIds.length) {
-        const id = beforeIds[preStep - 1]
-        return { speaker: id, text: prep.before[id] }
-      }
-      if (myTurn && beforeIds.length) return { speaker: 'clarissa', text: `Your turn, ${playerName}. ${question}` }
-      return { speaker: 'clarissa', text: question }
-    }
-    if (revealDone) return { speaker: 'thought', text: result.thought || 'All three answers are in. Who is rizzing hardest?' }
-    if (revealing) return { speaker: revealId, text: result.answers[revealId] }
+    if (beat) return { speaker: beat.speaker, text: beat.text }
     if (phase === 'verdict') return { speaker: 'clarissa', text: verdict?.speech }
     return { speaker: 'marvey', text: '' }
-  }, [phase, game, roundNumber, revealing, revealDone, revealId, result, verdict, beforeIds, preStep, prep, myTurn, playerName])
+  }, [phase, game, beat, verdict])
 
   const typed = useTypewriter(line.text)
-  const revealScore = revealing && !revealDone ? result.scores[revealId] : null
+  const revealScore = beat?.kind === 'react' ? beat.score : null
   const scoreShown = revealScore !== null && typed.done
   const clarissaMood = scoreShown ? moodFor(revealScore) : null
 
   useEffect(() => {
     if (scoreShown) sfx('heart', revealScore)
-  }, [scoreShown, revealScore, revealId])
+  }, [scoreShown, revealScore, step])
 
   useEffect(() => {
     if (phase === 'answering' && myTurn && seconds > 0 && seconds <= 10) sfx('tick')
@@ -391,7 +412,7 @@ function App() {
   }
   const talker = !typed.done || audioTalking ? line.speaker : null
   const completedRounds = history.length
-  const playerRounds = revealing && !revealDone ? completedRounds - 1 : completedRounds
+  const playerRounds = completedRounds - (result && !scoredSoFar.some((b) => b.seat === 'player') ? 1 : 0)
   const playerHearts = playerRounds ? totals.player / playerRounds : 0
   const sortedScores = useMemo(
     () => Object.entries(totals).sort(([, left], [, right]) => right - left),
@@ -505,11 +526,12 @@ function App() {
         {phase !== 'lobby' && phase !== 'verdict' && (
           <div className="podiums" aria-label="Contestants">
             {REVEAL_ORDER.map((id) => {
-              const shown = revealing && revealOrder.indexOf(id) < revealStep
-              const active = revealId === id && !revealDone
+              const scored = scoredSoFar.find((b) => b.seat === id)
+              const shown = Boolean(scored) && !revealDone
+              const active = beat && !revealDone && (beat.speaker === id || beat.seat === id)
               return (
                 <article key={id} className={`podium ${id === 'player' ? 'you' : ''} ${active ? 'active' : ''}`}>
-                  {shown && <span className="score-pop">+{result.scores[id] + (result.bonus?.[id] || 0)}</span>}
+                  {shown && <span className="score-pop">+{scored.points}</span>}
                   <PixelSprite id={spriteId(id)} talking={talker === id} className="sprite-md" label={displayName(id)} />
                   <div className="plate">
                     <strong>{displayName(id)}</strong>
@@ -523,6 +545,9 @@ function App() {
       </section>
 
       <section className="console">
+        {(phase === 'answering' || phase === 'reveal') && question && (
+          <p className="question-pin"><b>Q{roundNumber}/{totalRounds}</b> {question}</p>
+        )}
         {line.text && (
           <Dialog speaker={line.speaker} label={speakerLabel(line.speaker)} text={typed.shown} done={typed.done} onSkip={typed.skip} tone={line.speaker === 'player' ? 'you' : line.speaker === 'thought' ? 'thought' : ''}>
             {phase === 'lobby' && (
@@ -569,11 +594,22 @@ function App() {
               </div>
             )}
 
-            {phase === 'answering' && !myTurn && (
-              <div className="dialog-actions">
-                <button className="pixel-btn" onClick={() => { sfx('click'); setPreStep((step) => step + 1) }} disabled={!prep || !typed.done}>
-                  {!prep ? 'The others are getting ready…' : preStep < beforeIds.length ? `${displayName(beforeIds[preStep])} ▶` : 'Your turn ▶'}
-                </button>
+            {beat && !myTurn && !revealDone && (
+              <div className={beat.kind === 'react' ? 'reveal-meta' : 'dialog-actions'}>
+                {beat.kind === 'react' && (
+                  <>
+                    <span className="judge-note">To {displayName(beat.seat)}</span>
+                    <div className="score-badge">
+                      <Hearts value={beat.score} label={`${beat.score} out of 10`} />
+                      <b>{beat.score}/10</b>
+                    </div>
+                    {beat.points > beat.score && <span className="wink-tag">♥ ×2</span>}
+                    {beat.seat === 'player' && !used.includes('rewrite') && !rewriting && (
+                      <button className="pixel-btn ghost" onClick={() => { sfx('click'); setRewriting(true) }}>✎ Rewrite</button>
+                    )}
+                  </>
+                )}
+                <button className="pixel-btn" onClick={advance} disabled={busy || !nextBeat || !typed.done}>{nextLabel}</button>
               </div>
             )}
 
@@ -622,22 +658,7 @@ function App() {
               </form>
             )}
 
-            {revealing && !revealDone && (
-              <div className="reveal-meta">
-                <span className="judge-note">Clarissa: “{result.reactions[revealId]}”</span>
-                <div className="score-badge">
-                  <Hearts value={result.scores[revealId]} label={`${result.scores[revealId]} out of 10`} />
-                  <b>{result.scores[revealId]}/10</b>
-                </div>
-                {result.bonus?.[revealId] > 0 && <span className="wink-tag">♥ ×2</span>}
-                {revealId === 'player' && !used.includes('rewrite') && !rewriting && (
-                  <button className="pixel-btn ghost" onClick={() => { sfx('click'); setRewriting(true) }}>✎ Rewrite</button>
-                )}
-                <button className="pixel-btn" onClick={advanceReveal} disabled={busy}>{allRevealed ? 'Tally up ▶' : 'Next answer ▶'}</button>
-              </div>
-            )}
-
-            {rewriting && revealId === 'player' && !revealDone && (
+            {rewriting && beat?.seat === 'player' && beat.kind === 'react' && (
               <form className="answer-form rewrite" onSubmit={(event) => { event.preventDefault(); void submitRewrite() }}>
                 <textarea
                   value={answer}

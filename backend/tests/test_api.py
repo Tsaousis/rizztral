@@ -226,3 +226,65 @@ def test_judge_thought_names_contestants_not_labels():
     asyncio.run(service._judge(rnd, {"jacques": "a", "brad": "b", "player": "c"}, 1, 3))
     assert rnd.thought.startswith("A bold ")
     assert "[" not in rnd.thought and "answer C" not in rnd.thought
+
+
+def test_powerups_peek_wink_rewrite_once_each(client):
+    gid = client.post("/api/games", json={"player_name": "KOS"}).json()["game_id"]
+    peek = client.post(f"/api/games/{gid}/rounds/1/peek").json()
+    assert peek["contestant"] in {"jacques", "brad"} and peek["answer"].startswith("ai ")
+    assert client.post(f"/api/games/{gid}/rounds/1/peek").status_code == 409
+    rnd = client.post(f"/api/games/{gid}/rounds/1/answer", json={"answer": "abcd", "wink": True}).json()
+    assert rnd["scores"]["player"] == 2 and rnd["bonus"] == {"player": 2}
+    assert rnd["powerups"] == ["peek", "wink"]
+    rnd = client.post(f"/api/games/{gid}/rounds/1/rewrite", json={"answer": "x" * 16}).json()
+    assert rnd["scores"]["player"] == 8 and rnd["bonus"] == {"player": 8}
+    assert client.post(f"/api/games/{gid}/rounds/1/rewrite", json={"answer": "y"}).status_code == 409
+    rnd2 = client.post(f"/api/games/{gid}/rounds/2/answer", json={"answer": "x", "wink": True})
+    assert rnd2.status_code == 409
+
+
+def test_rewrite_only_latest_round(client):
+    gid, _, _ = play(client, ["a", "b"])
+    assert client.post(f"/api/games/{gid}/rounds/1/rewrite", json={"answer": "z"}).status_code == 409
+    assert client.post(f"/api/games/{gid}/rounds/2/rewrite", json={"answer": "z"}).status_code == 200
+
+
+def test_daily_challenge_shared_questions_type_and_board(client):
+    a = client.post("/api/games", json={"player_name": "AAA", "daily": True}).json()
+    b = client.post("/api/games", json={"player_name": "BBB", "daily": True}).json()
+    assert a["daily"] and a["questions"] == b["questions"] and len(a["questions"]) == 5
+    for i in range(1, 6):
+        client.post(f"/api/games/{a['game_id']}/rounds/{i}/answer", json={"answer": "x" * 10})
+    verdict = client.post(f"/api/games/{a['game_id']}/verdict").json()
+    assert verdict["daily"] == a["daily"] and "Daily contender" in verdict["badges"]
+    play(client, ["x" * 20] * 2)
+    client.post("/api/games", json={"player_name": "CCC"})
+    daily = client.get("/api/leaderboard?daily=true").json()
+    assert [e["name"] for e in daily["entries"]] == ["AAA"]
+    assert len(client.get("/api/leaderboard").json()["entries"]) == 1
+
+
+def test_verdict_reveals_type_profile_and_badges(tmp_path, monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("MISTRAL_API_KEY", raising=False)
+    settings = Settings(demo=True, db_path=tmp_path / "d.sqlite", static_dir=tmp_path / "none")
+    with TestClient(create_app(settings, tts=False)) as demo:
+        gid = demo.post("/api/games", json={"player_name": "KOS"}).json()["game_id"]
+        for i in range(1, 4):
+            rnd = demo.post(f"/api/games/{gid}/rounds/{i}/answer", json={"answer": "ok"}).json()
+            assert rnd["thought"]
+        verdict = demo.post(f"/api/games/{gid}/verdict").json()
+        assert verdict["type"]["label"] in {"Funny", "Poetic", "Nerdy", "Bold", "Sweet"}
+        assert verdict["profile"]["title"] == "The Dry Texter"
+        assert isinstance(verdict["badges"], list)
+
+
+def test_secret_type_rewards_matching_answers():
+    from rizztral import features
+    from rizztral.game import GameService, Round
+
+    plain, typed = Round(question="Q?"), Round(question="Q?")
+    GameService._demo_judge(plain, "I would take you to dinner at a place I like a lot.", "poetic")
+    GameService._demo_judge(typed, "I would take you to dinner under the moon, a place I like.", "poetic")
+    assert typed.scores["player"] > plain.scores["player"] or typed.scores["player"] == 10
+    assert features.profile(["I'd write you a poem under the stars, my heart is yours"])["title"] == "The Poet"

@@ -7,7 +7,7 @@ import time
 from collections import OrderedDict
 from dataclasses import dataclass, field
 
-from . import prompts
+from . import features, prompts
 from .cast import AI_IDS, ALL_CONTESTANT_IDS, CONTESTANTS
 from .config import Settings
 from .llm import LLM
@@ -44,6 +44,7 @@ class Round:
     scores: dict[str, int] = field(default_factory=dict)
     reactions: dict[str, str] = field(default_factory=dict)
     thought: str = ""
+    bonus: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass
@@ -56,10 +57,15 @@ class Game:
     verdict: dict | None = None
     contestant_models: dict[str, str] = field(default_factory=dict)
     live: bool = True
+    type_id: str = "funny"
+    daily: str | None = None
+    powerups: dict[str, int] = field(default_factory=dict)
     ai_tasks: dict[int, asyncio.Task] = field(default_factory=dict)
 
     def totals(self) -> dict[str, int]:
-        return {cid: sum(r.scores.get(cid, 0) for r in self.rounds) for cid in ALL_CONTESTANT_IDS}
+        return {
+            cid: sum(r.scores.get(cid, 0) + r.bonus.get(cid, 0) for r in self.rounds) for cid in ALL_CONTESTANT_IDS
+        }
 
     @property
     def finished_rounds(self) -> int:
@@ -114,10 +120,20 @@ class GameService:
             raise GameError(404, "No such round.")
         return game.rounds[number - 1]
 
-    async def start(self, player_name: str, rounds: int | None = None) -> Game:
+    async def start(self, player_name: str, rounds: int | None = None, daily: bool = False) -> Game:
         n = rounds or self.settings.rounds
         questions, intro, live = None, None, True
-        if not self.offline():
+        day = features.daily_key() if daily else None
+        rng = features.daily_rng(day) if daily else self.rng
+        type_id = rng.choice(sorted(features.TYPES))
+        if daily:
+            n = max(self.settings.round_options)
+            questions = rng.sample(prompts.QUESTION_BANK, n)
+            intro = (
+                f"Welcome to today's challenge, {player_name}. Everyone gets the same questions today, "
+                "so make yours the answer they talk about."
+            )
+        elif not self.offline():
             try:
                 data = await self.llm.json(
                     self.settings.models["clarissa"],
@@ -145,6 +161,8 @@ class GameService:
             rounds=[Round(question=q) for q in questions],
             contestant_models=self._pick_models(),
             live=live,
+            type_id=type_id,
+            daily=day,
         )
         self.games[game.id] = game
         while len(self.games) > self.settings.max_games:
@@ -195,35 +213,77 @@ class GameService:
             rnd.ai_answers = await asyncio.shield(task)
         return rnd.ai_answers
 
-    async def submit(self, game: Game, number: int, answer: str) -> Round:
+    def _use_powerup(self, game: Game, name: str, number: int) -> None:
+        if name in game.powerups:
+            raise GameError(409, f"{name.title()} is already used this show.")
+        game.powerups[name] = number
+
+    async def peek(self, game: Game, number: int) -> dict:
+        self._round(game, number)
+        if number != game.finished_rounds + 1:
+            raise GameError(409, "You can only peek at the current round.")
+        self._use_powerup(game, "peek", number)
+        ai = await self.ai_answers(game, number)
+        contestant = self.rng.choice(AI_IDS)
+        return {"contestant": contestant, "answer": ai[contestant]}
+
+    async def _score(self, game: Game, rnd: Round, number: int) -> None:
+        answers = {**(rnd.ai_answers or {}), "player": rnd.player_answer or "I don't know."}
+        if not self.offline():
+            try:
+                await self._judge(rnd, answers, number, len(game.rounds), game.type_id)
+                return
+            except Exception:
+                log.exception("AI provider failed during %s; using the built-in show", "judging")
+                self._mark_provider_down()
+        game.live = False
+        self._demo_judge(rnd, rnd.player_answer or "", game.type_id)
+
+    async def submit(self, game: Game, number: int, answer: str, wink: bool = False) -> Round:
         rnd = self._round(game, number)
         if number != game.finished_rounds + 1:
             raise GameError(409, "Rounds must be played in order.")
         ai = await self.ai_answers(game, number)
         if rnd.scores:
             return rnd
-        player_answer = answer.strip()[: self.settings.max_answer_chars]
-        answers = {**ai, "player": player_answer or "I don't know."}
-        rnd.player_answer = player_answer
-        if not self.offline():
-            try:
-                await self._judge(rnd, answers, number, len(game.rounds))
-                return rnd
-            except Exception:
-                log.exception("AI provider failed during %s; using the built-in show", "judging")
-                self._mark_provider_down()
-        game.live = False
-        self._demo_judge(rnd, player_answer)
+        if wink:
+            self._use_powerup(game, "wink", number)
+        rnd.ai_answers = ai
+        rnd.player_answer = answer.strip()[: self.settings.max_answer_chars]
+        await self._score(game, rnd, number)
+        if wink:
+            rnd.bonus["player"] = rnd.scores["player"]
         return rnd
 
-    async def _judge(self, rnd: Round, answers: dict[str, str], number: int, total: int) -> None:
+    async def rewrite(self, game: Game, number: int, answer: str) -> Round:
+        rnd = self._round(game, number)
+        if game.verdict or number != game.finished_rounds or not rnd.scores:
+            raise GameError(409, "You can only rewrite the answer you just gave.")
+        self._use_powerup(game, "rewrite", number)
+        retry = Round(question=rnd.question, ai_answers=rnd.ai_answers)
+        retry.player_answer = answer.strip()[: self.settings.max_answer_chars]
+        await self._score(game, retry, number)
+        rnd.player_answer = retry.player_answer
+        rnd.scores["player"] = retry.scores["player"]
+        rnd.reactions["player"] = retry.reactions["player"]
+        if game.powerups.get("wink") == number:
+            rnd.bonus["player"] = rnd.scores["player"]
+        return rnd
+
+    async def _judge(
+        self, rnd: Round, answers: dict[str, str], number: int, total: int, type_id: str = "funny"
+    ) -> None:
         ids = list(answers)
         self.rng.shuffle(ids)
         labels = {chr(ord("A") + i): cid for i, cid in enumerate(ids)}
         data = await self.llm.json(
             self.settings.models["clarissa"],
             prompts.judge_messages(
-                rnd.question, {lab: answers[cid] for lab, cid in labels.items()}, number, total
+                rnd.question,
+                {lab: answers[cid] for lab, cid in labels.items()},
+                number,
+                total,
+                features.TYPES[type_id]["desc"],
             ),
             temperature=0.6,
         )
@@ -239,13 +299,18 @@ class GameService:
         rnd.thought = thought or demo_thought(scores)
 
     @staticmethod
-    def _demo_judge(rnd: Round, player_answer: str) -> None:
+    def _demo_judge(rnd: Round, player_answer: str, type_id: str = "funny") -> None:
         seed = sum(ord(char) for char in rnd.question)
         word_count = len(player_answer.split())
         player_score = 1 if not player_answer else min(9, 2 + min(word_count, 15) // 2)
         if any(word in player_answer.lower() for word in ("laugh", "you", "together", "honest", "adventure")):
             player_score = min(10, player_score + 1)
-        rnd.scores = {"jacques": 6 + seed % 3, "brad": 6 + (seed // 3) % 3, "player": player_score}
+        rnd.scores = {"jacques": 5 + seed % 3, "brad": 5 + (seed // 3) % 3, "player": player_score}
+        kind = features.TYPES[type_id]
+        for cid in kind["fans"]:
+            rnd.scores[cid] = min(10, rnd.scores[cid] + features.TYPE_BONUS)
+        if player_answer and features.matches(type_id, player_answer):
+            rnd.scores["player"] = min(10, rnd.scores["player"] + features.TYPE_BONUS)
         for contestant_id, score in rnd.scores.items():
             if score >= 9:
                 reaction = "Okay, that had charm, confidence, and just enough chaos. I like it."
@@ -256,7 +321,7 @@ class GameService:
             else:
                 reaction = "That answer arrived, technically. The chemistry did not."
             rnd.reactions[contestant_id] = reaction
-        rnd.thought = demo_thought(rnd.scores)
+        rnd.thought = f"{demo_thought(rnd.scores)} {kind['hint']}"
 
     def winner(self, game: Game) -> str:
         totals = game.totals()
@@ -265,6 +330,27 @@ class GameService:
             ALL_CONTESTANT_IDS,
             key=lambda cid: (totals[cid], max(r.scores.get(cid, 0) for r in game.rounds), order[cid]),
         )
+
+    @staticmethod
+    def badges(game: Game, winner: str) -> list[str]:
+        totals = game.totals()
+        earned = []
+        if all(totals["player"] > totals[cid] for cid in AI_IDS):
+            earned.append("Out-rizzed both AIs")
+        if any(r.scores.get("player") == 10 for r in game.rounds):
+            earned.append("Perfect 10")
+        if sum(features.matches(game.type_id, r.player_answer or "") for r in game.rounds) >= 2:
+            earned.append("Type whisperer")
+        if winner == "player" and not game.powerups:
+            earned.append("No power-ups needed")
+        before = {
+            cid: sum(r.scores.get(cid, 0) + r.bonus.get(cid, 0) for r in game.rounds[:-1]) for cid in ALL_CONTESTANT_IDS
+        }
+        if winner == "player" and any(before[cid] > before["player"] for cid in AI_IDS):
+            earned.append("Comeback kid")
+        if game.daily:
+            earned.append("Daily contender")
+        return earned
 
     async def verdict(self, game: Game) -> dict:
         if game.verdict:
@@ -297,6 +383,10 @@ class GameService:
             "speech": speech,
             "totals": game.totals(),
             "live": game.live,
+            "type": {"id": game.type_id, "label": features.TYPES[game.type_id]["label"]},
+            "profile": features.profile([r.player_answer or "" for r in game.rounds]),
+            "badges": self.badges(game, winner),
+            "daily": game.daily,
             "models": dict(game.contestant_models) if game.live else None,
         }
         return game.verdict

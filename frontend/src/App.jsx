@@ -659,7 +659,7 @@ function App() {
             <p>The leaderboard tracks the most niche skill on the internet: who has the most rizz, humans or machines.</p>
             <p>Voice is switched off in this version, so the cast speaks in text. The original Game Jam build used ElevenLabs voices.</p>
             <p>
-              Live arena: with a Mistral key, Jacques and Brad are played by different models each show, and the
+              Live arena: with an AI key, Jacques and Brad are played by different models each show, and the
               AI models leaderboard counts which ones win Clarissa over.
             </p>
             <p className="credits">
@@ -668,6 +668,7 @@ function App() {
               <a href="https://github.com/jlexternal" target="_blank" rel="noreferrer">jlexternal</a> ·{' '}
               <a href="https://github.com/Tsaousis/rizztral" target="_blank" rel="noreferrer">Source on GitHub</a>
             </p>
+            <p className="privacy">Answers may be processed by AI providers. Please don’t share personal info.</p>
             <p className="about-tip"><b>Tip:</b> be specific, be funny, and ask something back. Clarissa loves curiosity.</p>
             <p>
               <b>Her secret type:</b> every show Clarissa secretly prefers funny, poetic, nerdy, bold or sweet answers. Read her

@@ -558,6 +558,17 @@ function App() {
 
             {phase === 'answering' && (
               <form className="answer-form" onSubmit={(event) => { event.preventDefault(); void submitAnswer() }}>
+                <div className="heard" aria-live="polite">
+                  {!prep && <p className="heard-wait">The others are getting ready…</p>}
+                  {prep && (
+                    <p className="speak-order">
+                      Speaking order: {prep.order.map((id) => displayName(id)).join(' → ')}
+                    </p>
+                  )}
+                  {prep && Object.entries(prep.before).map(([id, text]) => (
+                    <p key={id} className="peek-card"><b>{displayName(id)} said:</b> “{text}”</p>
+                  ))}
+                </div>
                 <textarea
                   value={answer}
                   onChange={(event) => setAnswer(event.target.value.slice(0, 280))}
@@ -571,17 +582,6 @@ function App() {
                   aria-label="Your answer"
                   autoFocus
                 />
-                <div className="heard" aria-live="polite">
-                  {!prep && <p className="heard-wait">The others are getting ready…</p>}
-                  {prep && (
-                    <p className="speak-order">
-                      Speaking order: {prep.order.map((id) => displayName(id)).join(' → ')}
-                    </p>
-                  )}
-                  {prep && Object.entries(prep.before).map(([id, text]) => (
-                    <p key={id} className="peek-card"><b>{displayName(id)} said:</b> “{text}”</p>
-                  ))}
-                </div>
                 {peek && (
                   <p className="peek-card"><b>{displayName(peek.contestant)} will say:</b> “{peek.answer}”</p>
                 )}

@@ -343,3 +343,15 @@ def test_gpt5_sampling_params():
     assert sampling("gpt-4.1-mini", 0.9, 200) == {"temperature": 0.9, "max_tokens": 200}
     assert sampling("gpt-5.4-nano", 0.9, 200)["reasoning_effort"] == "none"
     assert "temperature" not in sampling("gpt-5-mini", 0.9, 200)
+
+
+def test_each_show_draws_two_roster_characters(client):
+    seen = set()
+    for _ in range(12):
+        lineup = client.post("/api/games", json={"player_name": "KOS"}).json()["lineup"]
+        assert set(lineup) == {"jacques", "brad"}
+        ids = [c["id"] for c in lineup.values()]
+        assert len(set(ids)) == 2 and all("persona" not in c for c in lineup.values())
+        seen.update(ids)
+    assert len(seen) > 2
+    assert len(client.get("/api/config").json()["cast"]["roster"]) == 10

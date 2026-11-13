@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
 from . import features
-from .cast import BACHELORETTE, CONTESTANTS, HOST, PLAYER
+from .cast import BACHELORETTE, CONTESTANTS, HOST, PLAYER, ROSTER
 from .config import Settings
 from .game import Game, GameError, GameService
 from .leaderboard import Leaderboard
@@ -47,6 +47,7 @@ def public_cast(settings: Settings) -> dict:
         "host": HOST,
         "bachelorette": {**BACHELORETTE, "model": models["clarissa"]},
         "contestants": [{**strip(c), "model": models[c["id"]]} for c in CONTESTANTS] + [PLAYER],
+        "roster": [strip(c) for c in ROSTER],
     }
 
 
@@ -128,6 +129,9 @@ def create_app(settings: Settings | None = None, llm: LLM | None = None, tts: TT
             "intro": game.intro,
             "questions": [r.question for r in game.rounds],
             "daily": game.daily,
+            "lineup": {
+                seat: {k: v for k, v in game.character(seat).items() if k != "persona"} for seat in game.lineup
+            },
         }
 
     @app.post("/api/games/{game_id}/rounds/{number}/prepare")

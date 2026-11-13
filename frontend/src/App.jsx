@@ -84,10 +84,10 @@ function Hearts({ value, max = 10, label }) {
   )
 }
 
-function Dialog({ speaker, text, onSkip, done, children, tone = '' }) {
+function Dialog({ speaker, label, text, onSkip, done, children, tone = '' }) {
   return (
     <div className={`dialog-box ${tone}`} onClick={done ? undefined : onSkip}>
-      <div className="dialog-name">{SPEAKERS[speaker]}</div>
+      <div className="dialog-name">{label || SPEAKERS[speaker]}</div>
       <p className="dialog-text" aria-live="polite">
         {text}
         {!done && <span className="caret" aria-hidden="true">▌</span>}
@@ -124,7 +124,9 @@ function App() {
   const [wink, setWink] = useState(false)
   const [rewriting, setRewriting] = useState(false)
   const playerName = name || 'YOU'
-  const displayName = (id) => (id === 'player' ? playerName : CAST[id].name)
+  const displayName = (id) => (id === 'player' ? playerName : game?.lineup?.[id]?.name || CAST[id].name)
+  const spriteId = (seat) => (seat === 'player' ? 'player' : game?.lineup?.[seat]?.id || seat)
+  const speakerLabel = (speaker) => (CAST[speaker] && speaker !== 'player' ? displayName(speaker) : SPEAKERS[speaker])
 
   useEffect(() => {
     request('/config').then(setConfig).catch(() => {})
@@ -351,7 +353,7 @@ function App() {
       score: totalsNow.player,
       max: totalRounds * 10,
       won: verdict.winner === 'player',
-      winnerId: verdict.winner,
+      winnerId: spriteId(verdict.winner),
       winnerName: displayName(verdict.winner),
       beaten: ['jacques', 'brad'].filter((id) => totalsNow[id] < totalsNow.player).length,
     title: verdict.profile?.title,
@@ -441,9 +443,9 @@ function App() {
         {phase === 'verdict' && verdict && (
           <div className="verdict-stage">
             <div className="rose-burst" aria-hidden="true" />
-            <PixelSprite id={verdict.winner} talking={false} className="sprite-xxl bob" label={displayName(verdict.winner)} />
+            <PixelSprite id={spriteId(verdict.winner)} talking={false} className="sprite-xxl bob" label={displayName(verdict.winner)} />
             <h2 className="winner-title">
-              {verdict.winner === 'player' ? `${playerName} got the rose!` : `${CAST[verdict.winner].name} got the rose`}
+              {verdict.winner === 'player' ? `${playerName} got the rose!` : `${displayName(verdict.winner)} got the rose`}
             </h2>
             <ol className="final-scores">
               {sortedScores.map(([id, score], index) => (
@@ -454,7 +456,7 @@ function App() {
             </ol>
             {verdict.models && (
               <p className="arena-reveal">
-                Tonight’s AIs: <b>Jacques</b> was <code>{verdict.models.jacques}</code>, <b>Brad</b> was <code>{verdict.models.brad}</code>
+                Tonight’s AIs: <b>{displayName('jacques')}</b> was <code>{verdict.models.jacques}</code>, <b>{displayName('brad')}</b> was <code>{verdict.models.brad}</code>
               </p>
             )}
             {verdict.breakdown && (
@@ -491,7 +493,7 @@ function App() {
               return (
                 <article key={id} className={`podium ${id === 'player' ? 'you' : ''} ${active ? 'active' : ''}`}>
                   {shown && <span className="score-pop">+{result.scores[id] + (result.bonus?.[id] || 0)}</span>}
-                  <PixelSprite id={id} talking={talker === id} className="sprite-md" />
+                  <PixelSprite id={spriteId(id)} talking={talker === id} className="sprite-md" label={displayName(id)} />
                   <div className="plate">
                     <strong>{displayName(id)}</strong>
                     <b>{totals[id]}</b>
@@ -505,7 +507,7 @@ function App() {
 
       <section className="console">
         {line.text && (
-          <Dialog speaker={line.speaker} text={typed.shown} done={typed.done} onSkip={typed.skip} tone={line.speaker === 'player' ? 'you' : line.speaker === 'thought' ? 'thought' : ''}>
+          <Dialog speaker={line.speaker} label={speakerLabel(line.speaker)} text={typed.shown} done={typed.done} onSkip={typed.skip} tone={line.speaker === 'player' ? 'you' : line.speaker === 'thought' ? 'thought' : ''}>
             {phase === 'lobby' && (
               <div className="dialog-actions">
                 <label className="name-entry">
@@ -566,7 +568,7 @@ function App() {
                   autoFocus
                 />
                 {peek && (
-                  <p className="peek-card"><b>{CAST[peek.contestant].name} will say:</b> “{peek.answer}”</p>
+                  <p className="peek-card"><b>{displayName(peek.contestant)} will say:</b> “{peek.answer}”</p>
                 )}
                 <div className="powerups" aria-label="Power-ups, one use each per show">
                   <button type="button" className="power" onClick={peekAnswer} disabled={busy || used.includes('peek')} title="See one AI answer before you write yours">
@@ -671,7 +673,7 @@ function App() {
             <p>The leaderboard tracks the most niche skill on the internet: who has the most rizz, humans or machines.</p>
             <p>Voice is switched off in this version, so the cast speaks in text. The original Game Jam build used ElevenLabs voices.</p>
             <p>
-              Live arena: with an AI key, Jacques and Brad are played by different models each show, and the
+              Every show, two rivals are drawn from a cast of ten (Jacques and Brad are the 2025 originals). Live arena: with an AI key, each is played by a different model, and the
               AI models leaderboard counts which ones win Clarissa over.
             </p>
             <p className="credits">

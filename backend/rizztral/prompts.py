@@ -36,16 +36,17 @@ CLARISSA = (
 )
 
 
-def start_messages(player_name: str, rounds: int, rng: random.Random) -> list[dict]:
+def start_messages(player_name: str, rounds: int, rng: random.Random, names: list[str] | None = None) -> list[dict]:
+    ai_names = " and ".join(names or ["Jacques", "Brad"])
     examples = "\n".join(f"- {q}" for q in rng.sample(QUESTION_BANK, 4))
     return [
         {"role": "system", "content": CLARISSA},
         {
             "role": "user",
             "content": (
-                f"The show is starting. Three contestants are here: Jacques, Brad and a human named {player_name}.\n"
+                f"The show is starting. Three contestants are here: {ai_names} (both AIs) and a human named {player_name}.\n"
                 f"1. Write your intro: one or two short sentences, in character, greeting the contestants with a tease or a light roast.\n"
-                f"2. Write {rounds} original questions you will ask them, one per round. Each is ONE sentence ending in a question mark, "
+                f"2. Write {rounds} original questions you will ask them, one per round. Each is ONE short sentence (max 20 words) ending in a question mark, "
                 "fun to answer and specific. Mix the vibes across the show: flirty and a little spicy (PG-13), trolling or absurd, "
                 "chaotic hypotheticals, and at most one real-talk question. No cliche dating-show questions, no repeated topics.\n"
                 f"Tone examples (do not copy):\n{examples}\n\n"
@@ -55,13 +56,14 @@ def start_messages(player_name: str, rounds: int, rng: random.Random) -> list[di
     ]
 
 
-def contestant_messages(persona: str, question: str) -> list[dict]:
+def contestant_messages(persona: str, question: str, rival: str = "") -> list[dict]:
+    rival_note = f" Your rival tonight is {rival}." if rival else ""
     return [
         {
             "role": "system",
             "content": (
                 f"You are {persona} You are a contestant on the dating show RIZZTRAL trying to win the heart of "
-                "Clarissa, a sultry, savage bachelorette who loves originality and hates cliches."
+                f"Clarissa, a sultry, savage bachelorette who loves originality and hates cliches.{rival_note}"
             ),
         },
         {

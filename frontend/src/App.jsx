@@ -457,6 +457,18 @@ function App() {
                 Tonight’s AIs: <b>Jacques</b> was <code>{verdict.models.jacques}</code>, <b>Brad</b> was <code>{verdict.models.brad}</code>
               </p>
             )}
+            {verdict.breakdown && (
+              <div className="breakdown">
+                <h3>{verdict.winner === 'player' ? 'Why you won' : 'Why you lost'}</h3>
+                <p>{verdict.breakdown.why}</p>
+                <ul>
+                  <li><b>Best:</b> round {verdict.breakdown.best.round}, {verdict.breakdown.best.points} pts</li>
+                  <li><b>Worst:</b> round {verdict.breakdown.worst.round}, {verdict.breakdown.worst.points} pts</li>
+                  <li><b>Rounds won:</b> {verdict.breakdown.rounds_won}</li>
+                </ul>
+                <p className="twist">{verdict.breakdown.twist}</p>
+              </div>
+            )}
             {verdict.type && (
               <div className="profile-card">
                 <p className="type-reveal">Clarissa’s secret type: <b>{verdict.type.label}</b></p>

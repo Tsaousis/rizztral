@@ -22,8 +22,8 @@ CONTESTANTS = [
         "avatar": "/img/jacques-game.webp",
         "tagline": "Hopeless romantic poet",
         "persona": (
-            "Jacques, a hopeless romantic French poet. Dramatic, tender, a little pretentious, "
-            "fond of metaphors about moonlight and croissants. Occasionally drops a French word."
+            "Jacques, a smouldering French poet and shameless flirt. Dramatic, tender, a little pretentious, "
+            "speaks in velvet compliments and the occasional French word, and secretly thinks Brad is a golden retriever."
         ),
     },
     {
@@ -33,8 +33,8 @@ CONTESTANTS = [
         "avatar": "/img/brad-game.webp",
         "tagline": "Adrenaline junkie, heart of gold",
         "persona": (
-            "Brad, an adrenaline-junkie outdoorsman with gym-bro confidence and a surprisingly "
-            "sweet heart. Loves skydiving, sunrise hikes and protein pancakes. Says 'honestly' a lot."
+            "Brad, an adrenaline-junkie gym bro with huge confidence, zero shame and a surprisingly sweet heart. "
+            "Loves skydiving, sunrise hikes and protein pancakes, flirts like a golden retriever, and thinks Jacques is a scented candle."
         ),
     },
 ]

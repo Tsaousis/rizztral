@@ -310,7 +310,8 @@ class GameService:
         for label, cid in labels.items():
             entry = data.get(label) if isinstance(data.get(label), dict) else {}
             scores[cid] = clamp_score(entry.get("score"))
-            reactions[cid] = str(entry.get("reaction") or "Hmm. Next.").strip()
+            reaction = re.sub(r"\[[A-C]\][,:]?\s*", "", str(entry.get("reaction") or "Hmm. Next.")).strip()
+            reactions[cid] = reaction[:1].upper() + reaction[1:]
         rnd.scores, rnd.reactions = scores, reactions
         thought = str(data.get("thought") or "").strip()
         for label, cid in labels.items():
@@ -375,6 +376,55 @@ class GameService:
             earned.append("Daily contender")
         return earned
 
+    @staticmethod
+    def breakdown(game: Game, winner: str) -> dict:
+        def pts(r: Round, cid: str) -> int:
+            return r.scores.get(cid, 0) + r.bonus.get(cid, 0)
+
+        numbered = list(enumerate(game.rounds, start=1))
+        best_n, best = max(numbered, key=lambda nr: pts(nr[1], "player"))
+        worst_n, worst = min(numbered, key=lambda nr: pts(nr[1], "player"))
+        rival = winner if winner != "player" else max(AI_IDS, key=lambda cid: game.totals()[cid])
+        swing_n, swing = max(numbered, key=lambda nr: abs(pts(nr[1], rival) - pts(nr[1], "player")))
+        won_rounds = sum(pts(r, "player") >= max(pts(r, cid) for cid in AI_IDS) for r in game.rounds)
+        matched = sum(features.matches(game.type_id, r.player_answer or "") for r in game.rounds)
+        totals = game.totals()
+        gap = abs(totals[winner] - totals["player"]) if winner != "player" else totals["player"] - totals[rival]
+        label = features.TYPES[game.type_id]["label"].lower()
+        if winner == "player":
+            why = (
+                f"You took {won_rounds} of {len(game.rounds)} rounds and beat {NAMES[rival]} by {gap} pts. "
+                f"Round {best_n} sealed it: {pts(best, 'player')} pts."
+            )
+        else:
+            why = (
+                f"{NAMES[winner]} beat you by {gap} pts. Round {swing_n} hurt most: "
+                f"{NAMES[rival]} got {pts(swing, rival)}, you got {pts(swing, 'player')}."
+            )
+        if matched:
+            twist = f"Plot twist: she was secretly into {label} answers, and {matched} of yours hit her type."
+        else:
+            twist = f"Plot twist: she was secretly into {label} answers, and none of yours hit her type."
+        return {
+            "why": why,
+            "twist": twist,
+            "rounds_won": won_rounds,
+            "best": {"round": best_n, "question": best.question, "points": pts(best, "player")},
+            "worst": {"round": worst_n, "question": worst.question, "points": pts(worst, "player")},
+        }
+
+    @staticmethod
+    def night_summary(game: Game) -> str:
+        lines = []
+        for i, r in enumerate(game.rounds, start=1):
+            scores = ", ".join(
+                f"{NAMES.get(cid, game.player_name) if cid != 'player' else game.player_name} "
+                f"{r.scores.get(cid, 0) + r.bonus.get(cid, 0)}"
+                for cid in ALL_CONTESTANT_IDS
+            )
+            lines.append(f'Round {i} "{r.question}": {scores}. {game.player_name} said: "{(r.player_answer or "")[:160]}"')
+        return "\n".join(lines)
+
     async def verdict(self, game: Game) -> dict:
         if game.verdict:
             return game.verdict
@@ -385,14 +435,24 @@ class GameService:
         best_answer = best.player_answer if winner == "player" else (best.ai_answers or {}).get(winner, "")
         winner_name = game.player_name if winner == "player" else NAMES[winner]
         speech = ""
+        breakdown = self.breakdown(game, winner)
         if self._ai(game):
             try:
                 data = await self.llm.json(
                     self.settings.models["clarissa"],
-                    prompts.verdict_messages(winner_name, best_answer or "", game.player_name, winner == "player"),
+                    prompts.verdict_messages(
+                        winner_name,
+                        best_answer or "",
+                        game.player_name,
+                        winner == "player",
+                        self.night_summary(game),
+                        features.TYPES[game.type_id]["label"],
+                    ),
                     temperature=0.8,
                 )
                 speech = str(data.get("speech") or "").strip()
+                for key in ("why", "twist"):
+                    breakdown[key] = str(data.get(key) or "").strip() or breakdown[key]
             except Exception:
                 log.exception("AI provider failed during %s; using the built-in show", "verdict")
                 self._mark_provider_down()
@@ -409,6 +469,7 @@ class GameService:
             "type": {"id": game.type_id, "label": features.TYPES[game.type_id]["label"]},
             "profile": features.profile([r.player_answer or "" for r in game.rounds]),
             "badges": self.badges(game, winner),
+            "breakdown": breakdown,
             "daily": game.daily,
             "models": dict(game.contestant_models) if game.live else None,
         }

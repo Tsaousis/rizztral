@@ -7,6 +7,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
+from . import features
 from .cast import BACHELORETTE, CONTESTANTS, HOST, PLAYER
 from .config import Settings
 from .game import Game, GameError, GameService
@@ -18,6 +19,7 @@ from .tts import TTS
 class StartRequest(BaseModel):
     player_name: str = Field(min_length=1, max_length=20)
     rounds: int | None = None
+    daily: bool = False
 
     @field_validator("player_name")
     @classmethod
@@ -30,6 +32,7 @@ class StartRequest(BaseModel):
 
 class AnswerRequest(BaseModel):
     answer: str = Field(default="", max_length=1000)
+    wink: bool = False
 
 
 class SpeechRequest(BaseModel):
@@ -57,6 +60,8 @@ def round_payload(game: Game, number: int) -> dict:
         "scores": rnd.scores,
         "reactions": rnd.reactions,
         "thought": rnd.thought,
+        "bonus": rnd.bonus,
+        "powerups": sorted(game.powerups),
         "totals": game.totals(),
     }
 
@@ -115,8 +120,13 @@ def create_app(settings: Settings | None = None, llm: LLM | None = None, tts: TT
     async def start_game(body: StartRequest):
         if body.rounds is not None and body.rounds not in settings.round_options:
             raise HTTPException(422, f"rounds must be one of {list(settings.round_options)}")
-        game = await guarded(service.start(body.player_name, body.rounds))
-        return {"game_id": game.id, "intro": game.intro, "questions": [r.question for r in game.rounds]}
+        game = await guarded(service.start(body.player_name, body.rounds, body.daily))
+        return {
+            "game_id": game.id,
+            "intro": game.intro,
+            "questions": [r.question for r in game.rounds],
+            "daily": game.daily,
+        }
 
     @app.post("/api/games/{game_id}/rounds/{number}/prepare")
     async def prepare_round(game_id: str, number: int):
@@ -127,7 +137,17 @@ def create_app(settings: Settings | None = None, llm: LLM | None = None, tts: TT
     @app.post("/api/games/{game_id}/rounds/{number}/answer")
     async def answer_round(game_id: str, number: int, body: AnswerRequest):
         game = service.get(game_id)
-        await guarded(service.submit(game, number, body.answer))
+        await guarded(service.submit(game, number, body.answer, body.wink))
+        return round_payload(game, number)
+
+    @app.post("/api/games/{game_id}/rounds/{number}/peek")
+    async def peek_round(game_id: str, number: int):
+        return await guarded(service.peek(service.get(game_id), number))
+
+    @app.post("/api/games/{game_id}/rounds/{number}/rewrite")
+    async def rewrite_round(game_id: str, number: int, body: AnswerRequest):
+        game = service.get(game_id)
+        await guarded(service.rewrite(game, number, body.answer))
         return round_payload(game, number)
 
     @app.post("/api/games/{game_id}/verdict")
@@ -136,7 +156,7 @@ def create_app(settings: Settings | None = None, llm: LLM | None = None, tts: TT
         result = await guarded(service.verdict(game))
         totals = result["totals"]
         leaderboard.record(
-            game.id, game.player_name, totals["player"], 10 * len(game.rounds), result["winner"] == "player"
+            game.id, game.player_name, totals["player"], 10 * len(game.rounds), result["winner"] == "player", game.daily
         )
         if result["models"]:
             leaderboard.record_models(
@@ -145,8 +165,8 @@ def create_app(settings: Settings | None = None, llm: LLM | None = None, tts: TT
         return result
 
     @app.get("/api/leaderboard")
-    async def get_leaderboard(limit: int = 10):
-        return leaderboard.top(max(1, min(limit, 50)))
+    async def get_leaderboard(limit: int = 10, daily: bool = False):
+        return leaderboard.top(max(1, min(limit, 50)), features.daily_key() if daily else None)
 
     @app.post("/api/speech")
     async def speech(body: SpeechRequest):

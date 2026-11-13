@@ -328,3 +328,18 @@ def test_broken_arena_model_falls_back_to_default_model(client, monkeypatch):
     verdict = client.post(f"/api/games/{gid}/verdict").json()
     assert verdict["live"] is True
     assert "retired-model" not in verdict["models"].values()
+
+
+def test_verdict_explains_why_with_twist(client):
+    gid, _, _ = play(client, ["a fun long answer that wins", "x", "y"])
+    breakdown = client.post(f"/api/games/{gid}/verdict").json()["breakdown"]
+    assert breakdown["why"] and breakdown["twist"].startswith("Plot twist")
+    assert {"round", "question", "points"} <= set(breakdown["best"])
+
+
+def test_gpt5_sampling_params():
+    from rizztral.llm import sampling
+
+    assert sampling("gpt-4.1-mini", 0.9, 200) == {"temperature": 0.9, "max_tokens": 200}
+    assert sampling("gpt-5.4-nano", 0.9, 200)["reasoning_effort"] == "none"
+    assert "temperature" not in sampling("gpt-5-mini", 0.9, 200)

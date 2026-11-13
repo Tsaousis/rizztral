@@ -27,7 +27,7 @@ function heart(g, x, y, size, fill) {
   rows.forEach((row, ry) => [...row].forEach((c, rx) => c === '#' && g.fillRect(x + rx * size, y + ry * size, size, size)))
 }
 
-export async function renderShareCard({ name, score, max, won, winnerId, winnerName, beaten }) {
+export async function renderShareCard({ name, score, max, won, winnerId, winnerName, beaten, title, badges = [] }) {
   const canvas = document.createElement('canvas')
   canvas.width = 1200
   canvas.height = 630
@@ -61,15 +61,23 @@ export async function renderShareCard({ name, score, max, won, winnerId, winnerN
   g.fillText(headline, 470, 130, 680)
   g.fillStyle = '#ffb347'
   g.font = `800 150px "DM Sans", sans-serif`
-  g.fillText(`${score}/${max}`, 466, 210)
+  g.fillText(`${score}`, 466, 210)
+  const width = g.measureText(`${score}`).width
+  g.font = `700 48px ${pixel}`
+  g.fillText('PTS', 486 + width, 300)
   g.fillStyle = '#fff1d6'
   g.font = '700 40px "DM Sans", sans-serif'
   g.fillText(beaten ? `Out-rizzed ${beaten} of 2 AIs` : 'The machines won this time', 470, 390, 680)
-  const hearts = Math.round((score / max) * 10)
+  const hearts = Math.min(10, Math.round((score / max) * 10))
   for (let i = 0; i < 10; i += 1) heart(g, 470 + i * 62, 456, 7, i < hearts ? '#ff2f91' : 'rgba(255, 255, 255, .2)')
+  if (title) {
+    g.fillStyle = '#ff7ac0'
+    g.font = `700 32px ${pixel}`
+    g.fillText(`${title.toUpperCase()}${badges.length ? ` · ${badges.length} BADGE${badges.length > 1 ? 'S' : ''}` : ''}`, 470, 514, 680)
+  }
   g.fillStyle = '#47eaff'
-  g.font = `700 30px ${pixel}`
-  g.fillText('Can you out-rizz the machines?', 470, 534)
+  g.font = `700 28px ${pixel}`
+  g.fillText('Can you out-rizz the machines?', 470, 566)
 
   const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'))
   return { blob, url: URL.createObjectURL(blob) }

@@ -521,3 +521,4 @@ a.pixel-btn { display: inline-block; text-decoration: none; }
 .badges { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin: 0; padding: 0; list-style: none; }
 .badges li { font: 700 13px var(--pixel); color: #140829; background: var(--cyan); padding: 4px 8px; box-shadow: 2px 2px 0 rgba(0, 0, 0, .5); }
 @media (prefers-reduced-motion: reduce) { .power.armed { animation: none; } }
+.privacy { font-size: 13px; opacity: .7; }

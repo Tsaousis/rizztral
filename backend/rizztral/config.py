@@ -7,7 +7,7 @@ PROVIDERS = {
         "base_url": None,
         "key_env": "OPENAI_API_KEY",
         "models": {"clarissa": "gpt-4.1-mini", "jacques": "gpt-4.1-mini", "brad": "gpt-4o-mini"},
-        "arena": ["gpt-4.1-mini", "gpt-4o-mini", "gpt-4.1-nano"],
+        "arena": ["gpt-4.1-mini", "gpt-4o-mini"],
     },
     "mistral": {
         "base_url": "https://api.mistral.ai/v1",

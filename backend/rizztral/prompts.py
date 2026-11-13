@@ -83,7 +83,8 @@ def judge_messages(
                 "use the full range, 9-10 is rare and must be earned, a bland answer is about 4. "
                 + (
                     f"Your secret type tonight: you are most charmed by {secret_type}. Give answers that fit it about "
-                    "2 extra points. Drop subtle hints about your type in reactions and the thought, never name it.\n"
+                    "2 extra points. Drop subtle hints in reactions and the thought, but never reveal it: never use the words "
+                    "'secret', 'type', 'nerdy', 'funny', 'poetic', 'bold' or 'sweet'.\n"
                     if secret_type
                     else ""
                 )
@@ -92,7 +93,8 @@ def judge_messages(
                 "For each, write a reaction: one in-character sentence, max 18 words, spoken directly to that contestant. "
                 "Never mention labels, scores or numbers in reactions.\n"
                 'Also add "thought": one private sentence, max 25 words, on why your favourite answer won you over. '
-                "Refer to answers as [A], [B] or [C] there.\n"
+                "Write it in first person and refer to the contestant only as [A], [B] or [C], e.g. "
+                "'[B] made me laugh and then made me think.' Never say 'answer', 'the human' or 'it'.\n"
                 f'Respond with JSON only: {{{keys}, "thought": "..."}}'
             ),
         },

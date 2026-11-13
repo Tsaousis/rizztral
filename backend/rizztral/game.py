@@ -456,7 +456,7 @@ class GameService:
         best_n, best = max(numbered, key=lambda nr: pts(nr[1], "player"))
         worst_n, worst = min(numbered, key=lambda nr: pts(nr[1], "player"))
         rival = winner if winner != "player" else max(AI_IDS, key=lambda cid: game.totals()[cid])
-        swing_n, swing = max(numbered, key=lambda nr: abs(pts(nr[1], rival) - pts(nr[1], "player")))
+        swing_n, swing = max(numbered, key=lambda nr: pts(nr[1], rival) - pts(nr[1], "player"))
         won_rounds = sum(pts(r, "player") >= max(pts(r, cid) for cid in AI_IDS) for r in game.rounds)
         matched = sum(features.matches(game.type_id, r.player_answer or "") for r in game.rounds)
         totals = game.totals()
@@ -526,6 +526,7 @@ class GameService:
             except Exception:
                 log.exception("AI provider failed during %s; using the built-in show", "verdict")
                 self._mark_provider_down()
+                game.live = False
         if not speech:
             speech = (
                 f"{winner_name}, you brought the best mix of wit and chemistry tonight. "

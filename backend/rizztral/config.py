@@ -57,6 +57,16 @@ class Settings:
             os.getenv("RIZZTRAL_STATIC", Path(__file__).resolve().parents[2] / "frontend" / "dist")
         )
     )
+    allowed_origins: tuple[str, ...] = field(
+        default_factory=lambda: tuple(
+            origin.strip().rstrip("/")
+            for origin in os.getenv(
+                "RIZZTRAL_ALLOWED_ORIGINS",
+                "http://localhost:5173,http://127.0.0.1:5173",
+            ).split(",")
+            if origin.strip()
+        )
+    )
 
     @property
     def api_key(self) -> str | None:

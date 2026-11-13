@@ -378,6 +378,8 @@ button { font: inherit; }
 .leaderboard-modal {
   position: relative;
   width: min(440px, 100%);
+  max-height: calc(100dvh - 40px);
+  overflow-y: auto;
   padding: 28px 24px 22px;
   background: var(--night);
   border: 4px solid var(--cream);
@@ -385,6 +387,95 @@ button { font: inherit; }
   box-shadow: inset 0 0 0 4px var(--ink);
   font-family: var(--pixel);
   animation: pop-up .3s steps(3);
+}
+
+.wake-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(12, 4, 31, .88);
+  backdrop-filter: blur(5px);
+}
+
+.wake-card {
+  width: min(430px, 100%);
+  padding: 24px;
+  text-align: center;
+  background: linear-gradient(180deg, rgba(45, 15, 81, .98), rgba(19, 8, 43, .98));
+  color: var(--cream);
+}
+
+.wake-card h2 {
+  margin: 4px 0 8px;
+  color: var(--cream);
+  font-size: clamp(1.55rem, 6vw, 2.4rem);
+  text-transform: uppercase;
+  text-shadow: 3px 3px 0 var(--pink);
+}
+
+.wake-card p { margin: 0 auto 14px; max-width: 330px; }
+.wake-card small { display: block; margin-top: 10px; color: var(--cyan); }
+
+.wake-heart {
+  position: relative;
+  width: 145px;
+  height: 132px;
+  margin: 0 auto 8px;
+  display: grid;
+  place-items: center;
+}
+
+.wake-heart svg {
+  width: 100%;
+  overflow: visible;
+  filter: drop-shadow(0 0 12px rgba(255, 50, 164, .7));
+}
+
+.wake-heart path {
+  fill: rgba(255, 50, 164, .08);
+  stroke: var(--pink);
+  stroke-width: 5;
+  stroke-linecap: square;
+  stroke-linejoin: bevel;
+  stroke-dasharray: 260;
+  stroke-dashoffset: 260;
+  animation: draw-heart 2.2s steps(12) infinite;
+}
+
+.wake-bar {
+  height: 16px;
+  padding: 3px;
+  border: 2px solid var(--cyan);
+  background: #120827;
+  box-shadow: 3px 3px 0 rgba(0, 0, 0, .45);
+}
+
+.wake-bar i {
+  display: block;
+  height: 100%;
+  width: 35%;
+  background: linear-gradient(90deg, var(--pink), var(--sun), var(--cyan));
+  animation: wake-progress 2s steps(8) infinite;
+}
+
+.offline-note {
+  border: 1px solid var(--sun);
+  padding: 7px 9px;
+  color: var(--cream);
+}
+
+@keyframes draw-heart {
+  0% { stroke-dashoffset: 260; opacity: .35; }
+  65%, 88% { stroke-dashoffset: 0; opacity: 1; }
+  100% { stroke-dashoffset: -260; opacity: .35; }
+}
+
+@keyframes wake-progress {
+  from { transform: translateX(0); }
+  to { transform: translateX(185%); }
 }
 .leaderboard-modal h2 { margin: 4px 0 16px; font-size: 2rem; text-transform: uppercase; text-shadow: 3px 3px 0 var(--pink); }
 .leader-row { display: grid; grid-template-columns: 3ch 1fr auto; gap: 12px; padding: 8px 0; border-bottom: 2px dashed rgba(255, 255, 255, .2); font-size: 1.1rem; }

@@ -3,6 +3,7 @@ import re
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
@@ -80,6 +81,13 @@ def create_app(settings: Settings | None = None, llm: LLM | None = None, tts: TT
     leaderboard = Leaderboard(settings.db_path)
 
     app = FastAPI(title="Rizztral", docs_url="/api/docs", openapi_url="/api/openapi.json")
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=list(settings.allowed_origins),
+        allow_origin_regex=r"https://[-a-z0-9]+\.hf\.space",
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["Content-Type"],
+    )
     app.state.service = service
     app.state.leaderboard = leaderboard
 

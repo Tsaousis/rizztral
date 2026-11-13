@@ -3,8 +3,9 @@ title: Rizztral
 emoji: 💘
 colorFrom: pink
 colorTo: purple
-sdk: docker
-app_port: 7860
+sdk: static
+app_build_command: cd frontend && npm ci && npm run build
+app_file: frontend/dist/index.html
 pinned: false
 short_description: Can you out-rizz two AI contestants?
 ---
@@ -27,8 +28,8 @@ out of roughly 100 teams. The original frontend is
 [Costopoulos/Rizztral](https://github.com/Costopoulos/Rizztral) and the jam build lives on the
 [original Hugging Face Space](https://huggingface.co/spaces/Mistral-AI-Game-Jam/Rizztral).
 This version keeps the premise, Clarissa and the original contestants Jacques and Brad, and replaces
-the retired Heroku and Render backends with a single secure Docker app, a new pixel-art look and new
-gameplay.
+the retired backend with a secure FastAPI service, a static React frontend, a new pixel-art look and
+new gameplay.
 
 ## Why we built it
 
@@ -53,13 +54,16 @@ skill: who has the most rizz, humans or machines.
 
 ## How it works
 
-- React and Vite render the show interface; FastAPI serves it and all API routes from one container.
+- React and Vite render the show interface as a static site; FastAPI serves the game API from a
+  separate Docker service.
 - OpenAI (`OPENAI_API_KEY`) or Mistral (`MISTRAL_API_KEY`) power the show. OpenAI defaults:
   `gpt-5.4-mini` for Clarissa, with contestants drawn from `gpt-5.4-mini`, `gpt-5.4-nano` and
   `gpt-5-mini`. Mistral defaults: `mistral-small-latest` and Ministral 8B/3B. Override with
   `RIZZTRAL_MODEL_CLARISSA` and `RIZZTRAL_ARENA_MODELS`.
 - If the key is missing, expired, out of credits, or rate limited, the game falls back to its
   built-in show instead of failing, then retries the provider after two minutes.
+- If the API service itself is unavailable, the browser runs an emergency built-in show and uses the
+  last saved leaderboard snapshot, so the static Space remains playable.
 - Provider keys stay on the server and are never included in browser code.
 - Cast of ten AI rivals (Jacques, Brad, Amara, Kenji, Priya, Diego, Layla, Malik, Mei, Bernard), each
   with their own pixel sprite and personality; two are drawn per show. They remember the show but only
@@ -92,16 +96,22 @@ docker run -e RIZZTRAL_DEMO=1 -p 7860:7860 rizztral
 
 Demo mode uses built-in questions, contestant answers, scores, and verdicts. Voice is disabled.
 
-## Hugging Face Space
+## Deploy
 
-This repository is ready for a Docker Space:
+The root `README.md` configures Hugging Face as a free static Space. It builds the React app without
+using a CPU slot. Add a public Space variable named `VITE_API_BASE` with the Render service URL, then
+push the repository to the Space. `frontend/public/config.js` is also available as a runtime override
+for hosts that cannot provide build variables.
 
-1. Add `OPENAI_API_KEY` (or `MISTRAL_API_KEY`) under **Settings → Variables and secrets**.
-2. Push the repository to the Space.
-3. Hugging Face builds the Dockerfile and serves the app on port `7860`.
+Deploy the API from the same repository with the Render Blueprint in `render.yaml`:
 
-The default SQLite leaderboard is ephemeral on Hugging Face. Set `RIZZTRAL_DB` to a path on
-persistent storage if scores must survive Space restarts.
+1. In Render, choose **New → Blueprint** and connect this repository.
+2. Keep the free `rizztral-api` Web Service settings.
+3. Enter `OPENAI_API_KEY` (or replace it with `MISTRAL_API_KEY` and set `RIZZTRAL_PROVIDER=mistral`).
+4. After Render assigns the `onrender.com` URL, add it to the Hugging Face Space as `VITE_API_BASE`.
+
+The free Render filesystem is ephemeral, so the SQLite leaderboard can reset after a deploy or
+service replacement. Browsers keep the latest successful leaderboard as a read-only fallback.
 
 ## Development
 

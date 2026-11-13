@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import PixelSprite from './PixelSprite.jsx'
+import { API_BASE, apiUrl, cacheLeaderboard, isBrowserFallback, request, wakeServer } from './api.js'
 import { renderShareCard } from './share.js'
 import { isMuted, setMuted, sfx, startMusic, stopMusic } from './sound.js'
 import './App.css'
@@ -34,17 +35,6 @@ const cleanName = (value) => value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice
 const moodFor = (score) => (score >= 9 ? 'love' : score >= 6 ? 'blush' : score <= 3 ? 'meh' : null)
 const LOBBY_LINE =
   "Welcome to Rizztral! Tonight, one human and two AIs fight for Clarissa's heart. Pick three or five questions. Blind judging, one rose."
-
-async function request(path, options = {}) {
-  const response = await fetch(`/api${path}`, {
-    ...options,
-    headers: { 'Content-Type': 'application/json', ...options.headers },
-  })
-  const body = await response.json().catch(() => ({}))
-  if (!response.ok) throw new Error(body.detail || 'The villa lost its signal. Try again.')
-  return body
-}
-
 const prefersReducedMotion = () =>
   typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
 
@@ -113,6 +103,8 @@ function App() {
   const [verdict, setVerdict] = useState(null)
   const [leaderboard, setLeaderboard] = useState(null)
   const [busy, setBusy] = useState(false)
+  const [waking, setWaking] = useState(false)
+  const [browserOffline, setBrowserOffline] = useState(false)
   const [error, setError] = useState('')
   const [audioTalking, setAudioTalking] = useState(false)
   const [aboutOpen, setAboutOpen] = useState(false)
@@ -166,14 +158,19 @@ function App() {
   const speakerLabel = (speaker) => (CAST[speaker] && speaker !== 'player' ? displayName(speaker) : SPEAKERS[speaker])
 
   useEffect(() => {
-    request('/config').then(setConfig).catch(() => {})
+    request('/config')
+      .then((data) => {
+        setConfig(data)
+        setBrowserOffline(isBrowserFallback())
+      })
+      .catch(() => {})
   }, [])
 
   const speak = useCallback(
     async (text, speaker) => {
       if (!config.tts || !text) return
       try {
-        const response = await fetch('/api/speech', {
+        const response = await fetch(apiUrl('/speech'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ text, speaker }),
@@ -209,10 +206,17 @@ function App() {
     setBusy(true)
     setError('')
     try {
+      if (API_BASE && !isBrowserFallback()) {
+        setWaking(true)
+        const online = await wakeServer()
+        setBrowserOffline(!online)
+        setWaking(false)
+      }
       const data = await request('/games', {
         method: 'POST',
         body: JSON.stringify({ player_name: playerName, rounds: roundCount, daily: daily === true }),
       })
+      setBrowserOffline(Boolean(data.offline || isBrowserFallback()))
       setGame(data)
       setUsed([])
       setPeek(null)
@@ -226,6 +230,7 @@ function App() {
     } catch (err) {
       setError(err.message)
     } finally {
+      setWaking(false)
       setBusy(false)
     }
   }
@@ -338,7 +343,9 @@ function App() {
         request('/leaderboard?limit=8'),
         request('/leaderboard?limit=8&daily=true'),
       ])
-      setLeaderboard({ ...all, today })
+      const snapshot = { ...all, today }
+      if (!snapshot.offline) cacheLeaderboard(snapshot)
+      setLeaderboard(snapshot)
     } catch (err) {
       setError(err.message)
     }
@@ -421,6 +428,21 @@ function App() {
 
   return (
     <main className={`show-shell phase-${phase}`}>
+      {waking && (
+        <div className="wake-backdrop" role="status" aria-live="polite">
+      <div className="wake-card pixel-frame">
+        <div className="wake-heart" aria-hidden="true">
+          <svg viewBox="0 0 100 92">
+            <path d="M50 84 14 50C-5 31 8 6 29 9c10 1 17 8 21 16C54 17 61 10 71 9c21-3 34 22 15 41Z" />
+          </svg>
+        </div>
+        <h2>Waking the villa…</h2>
+        <p>A little heart is drawing itself while the free server stretches.</p>
+            <div className="wake-bar"><i /></div>
+            <small>If it stays asleep, the built-in show takes over.</small>
+          </div>
+        </div>
+      )}
       <div className="stage-art" aria-hidden="true" />
       <div className="scanlines" aria-hidden="true" />
       <div className="sparkles" aria-hidden="true">{Array.from({ length: 14 }, (_, i) => <i key={i} />)}</div>
@@ -584,7 +606,7 @@ function App() {
                     </button>
                   ))}
                 </div>
-                <span className="microcopy">blind judging · no signup{config.demo ? ' · demo mode' : ''}</span>
+                <span className="microcopy">blind judging · no signup{config.demo || browserOffline ? ' · built-in show' : ''}</span>
               </div>
             )}
 
@@ -760,6 +782,7 @@ function App() {
             <button className="close-button" onClick={() => setLeaderboard(null)} aria-label="Close">×</button>
             <p className="insert-coin">★ High scores ★</p>
             <h2>Top rizz</h2>
+            {leaderboard.offline && <p className="board-note offline-note">Server offline · showing the last saved board and scores from this browser.</p>}
             <div className="board-tabs" role="tablist">
               <button role="tab" aria-selected={boardTab === 'humans'} className={`pick ${boardTab === 'humans' ? 'on' : ''}`} onClick={() => setBoardTab('humans')}>
                 Players

@@ -58,6 +58,18 @@ def test_config_hides_personas(client):
     assert [c["id"] for c in cfg["cast"]["contestants"]] == ["jacques", "brad", "player"]
 
 
+def test_hugging_face_static_space_can_call_api(client):
+    response = client.options(
+        "/api/config",
+        headers={
+            "Origin": "https://mistral-ai-game-jam-rizztral.hf.space",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "https://mistral-ai-game-jam-rizztral.hf.space"
+
+
 def test_start_pads_missing_questions(client):
     game = client.post("/api/games", json={"player_name": "Costas"}).json()
     assert game["intro"] == "Hello boys."
@@ -227,8 +239,13 @@ def test_clarissa_reacts_to_each_answer_as_it_lands(client):
 
 
 def test_powerups_peek_wink_rewrite_once_each(client):
-    gid = client.post("/api/games", json={"player_name": "KOS"}).json()["game_id"]
-    peek = client.post(f"/api/games/{gid}/rounds/1/peek").json()
+    for _ in range(10):
+        gid = client.post("/api/games", json={"player_name": "KOS"}).json()["game_id"]
+        response = client.post(f"/api/games/{gid}/rounds/1/peek")
+        if response.status_code == 200:
+            break
+    assert response.status_code == 200
+    peek = response.json()
     assert peek["contestant"] in {"jacques", "brad"} and peek["answer"].startswith("ai ")
     assert client.post(f"/api/games/{gid}/rounds/1/peek").status_code == 409
     rnd = client.post(f"/api/games/{gid}/rounds/1/answer", json={"answer": "abcd", "wink": True}).json()

@@ -535,3 +535,9 @@ a.pixel-btn { display: inline-block; text-decoration: none; }
 .heard { display: grid; gap: 4px; margin-top: 6px; }
 .heard .peek-card { margin: 0; }
 .speak-order, .heard-wait { margin: 0; font: 700 13px var(--pixel); color: var(--cyan); letter-spacing: .5px; }
+
+.question-pin {
+  margin: 0 auto 8px; max-width: 860px; padding: 6px 12px; background: rgba(20, 8, 41, .88); border: 2px solid var(--cyan);
+  box-shadow: 3px 3px 0 rgba(0, 0, 0, .45); font-family: 'DM Sans', system-ui, sans-serif; font-size: 15px; color: var(--cream);
+}
+.question-pin b { font: 700 14px var(--pixel); color: var(--cyan); margin-right: 6px; }

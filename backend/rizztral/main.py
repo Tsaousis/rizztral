@@ -139,7 +139,15 @@ def create_app(settings: Settings | None = None, llm: LLM | None = None, tts: TT
     async def prepare_round(game_id: str, number: int):
         game = service.get(game_id)
         before = await guarded(service.ai_answers(game, number))
-        return {"ready": True, "order": game.rounds[number - 1].order, "before": before}
+        rnd = game.rounds[number - 1]
+        return {
+            "ready": True,
+            "order": rnd.order,
+            "before": {
+                seat: {"answer": text, "score": rnd.scores.get(seat), "reaction": rnd.reactions.get(seat)}
+                for seat, text in before.items()
+            },
+        }
 
     @app.post("/api/games/{game_id}/rounds/{number}/answer")
     async def answer_round(game_id: str, number: int, body: AnswerRequest):

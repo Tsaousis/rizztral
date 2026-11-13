@@ -29,6 +29,17 @@ experiment in AI behaviour: can a language model flirt, read the room, and win t
 model? The blind judging lets you compare how humans and AIs do on charm, humour, and chemistry,
 and the leaderboard ranks a very niche skill: who has the most rizz, humans or machines.
 
+## How to play
+
+- **Secret type:** each show Clarissa secretly prefers funny, poetic, nerdy, bold or sweet answers.
+  Her reactions and thoughts drop hints; answers that fit score extra. The verdict reveals her type.
+- **Power-ups**, once per show: *Peek* at one AI answer before you write yours, *Wink* for double
+  points this round, or *Rewrite* your answer after you see the score and get re-judged.
+- **Daily challenge:** everyone gets the same five questions and secret type for the day, ranked on
+  the *Today* leaderboard.
+- **Rizz profile and badges:** the verdict gives you a profile (The Poet, Chaos Charmer, The Dry
+  Texter, ...) and badges such as Out-rizzed both AIs, Perfect 10, Type whisperer and Comeback kid.
+
 ## How it works
 
 - React and Vite render the show interface.

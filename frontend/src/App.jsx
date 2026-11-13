@@ -119,6 +119,10 @@ function App() {
   const [name, setName] = useState(() => cleanName(localStorage.getItem(NAME_KEY) || ''))
   const [muted, setMutedState] = useState(isMuted)
   const [share, setShare] = useState(null)
+  const [used, setUsed] = useState([])
+  const [peek, setPeek] = useState(null)
+  const [wink, setWink] = useState(false)
+  const [rewriting, setRewriting] = useState(false)
   const playerName = name || 'YOU'
   const displayName = (id) => (id === 'player' ? playerName : CAST[id].name)
 
@@ -158,7 +162,7 @@ function App() {
     else startMusic()
   }
 
-  const startShow = async () => {
+  const startShow = async (daily = false) => {
     sfx('start')
     startMusic()
     localStorage.setItem(NAME_KEY, name)
@@ -168,9 +172,12 @@ function App() {
     try {
       const data = await request('/games', {
         method: 'POST',
-        body: JSON.stringify({ player_name: playerName, rounds: roundCount }),
+        body: JSON.stringify({ player_name: playerName, rounds: roundCount, daily: daily === true }),
       })
       setGame(data)
+      setUsed([])
+      setPeek(null)
+      setWink(false)
       setHistory([])
       setTotals({ jacques: 0, brad: 0, player: 0 })
       setVerdict(null)
@@ -190,6 +197,9 @@ function App() {
     setAnswer('')
     setResult(null)
     setRevealStep(0)
+    setPeek(null)
+    setWink(false)
+    setRewriting(false)
     setSeconds(config.answer_seconds)
     setError('')
     setPhase('answering')
@@ -208,9 +218,10 @@ function App() {
         const submitted = typeof forcedAnswer === 'string' ? forcedAnswer : answer
         const data = await request(`/games/${game.game_id}/rounds/${roundNumber}/answer`, {
           method: 'POST',
-          body: JSON.stringify({ answer: submitted }),
+          body: JSON.stringify({ answer: submitted, wink }),
         })
         setResult(data)
+        setUsed(data.powerups)
         setRevealStep(0)
         setHistory((current) => [...current, data])
         setPhase('reveal')
@@ -220,8 +231,41 @@ function App() {
         setBusy(false)
       }
     },
-    [answer, busy, game, phase, roundNumber],
+    [answer, busy, game, phase, roundNumber, wink],
   )
+
+  const peekAnswer = async () => {
+    if (busy || used.includes('peek')) return
+    sfx('click')
+    try {
+      const data = await request(`/games/${game.game_id}/rounds/${roundNumber}/peek`, { method: 'POST' })
+      setPeek(data)
+      setUsed((current) => [...current, 'peek'])
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  const submitRewrite = async () => {
+    if (busy || !answer.trim()) return
+    setBusy(true)
+    setError('')
+    try {
+      const data = await request(`/games/${game.game_id}/rounds/${roundNumber}/rewrite`, {
+        method: 'POST',
+        body: JSON.stringify({ answer }),
+      })
+      setResult(data)
+      setUsed(data.powerups)
+      setHistory((current) => [...current.slice(0, -1), data])
+      setRewriting(false)
+      sfx('start')
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
 
   useEffect(() => {
     if (phase !== 'answering' || busy) return undefined
@@ -252,20 +296,27 @@ function App() {
 
   const showLeaderboard = async () => {
     try {
-      setLeaderboard(await request('/leaderboard?limit=8'))
+      const [all, today] = await Promise.all([
+        request('/leaderboard?limit=8'),
+        request('/leaderboard?limit=8&daily=true'),
+      ])
+      setLeaderboard({ ...all, today })
     } catch (err) {
       setError(err.message)
     }
   }
 
   const totalRounds = game?.questions?.length || roundCount
+  const board = (boardTab === 'today' ? leaderboard?.today : leaderboard) || {}
   const revealing = phase === 'reveal' && result
   const revealId = revealing ? REVEAL_ORDER[Math.min(revealStep, REVEAL_ORDER.length - 1)] : null
   const allRevealed = revealing && revealStep >= REVEAL_ORDER.length - 1
 
   const advanceReveal = () => {
     if (!revealing) return
-    setTotals((current) => ({ ...current, [revealId]: current[revealId] + result.scores[revealId] }))
+    setRewriting(false)
+    const gained = result.scores[revealId] + (result.bonus?.[revealId] || 0)
+    setTotals((current) => ({ ...current, [revealId]: current[revealId] + gained }))
     if (revealStep < REVEAL_ORDER.length) setRevealStep((step) => step + 1)
   }
   const revealDone = revealing && revealStep >= REVEAL_ORDER.length
@@ -303,13 +354,15 @@ function App() {
       winnerId: verdict.winner,
       winnerName: displayName(verdict.winner),
       beaten: ['jacques', 'brad'].filter((id) => totalsNow[id] < totalsNow.player).length,
+    title: verdict.profile?.title,
+    badges: verdict.badges || [],
     })
     setShare(card)
   }
 
   const shareCard = async () => {
     const file = new File([share.blob], 'rizztral.png', { type: 'image/png' })
-    const text = `I scored ${verdict.totals.player}/${totalRounds * 10} on Rizztral. Can you out-rizz the machines?`
+    const text = `I scored ${verdict.totals.player} pts on Rizztral. Can you out-rizz the machines?`
     if (navigator.canShare?.({ files: [file] })) {
       await navigator.share({ files: [file], text, url: window.location.origin }).catch(() => {})
     } else {
@@ -395,7 +448,7 @@ function App() {
             <ol className="final-scores">
               {sortedScores.map(([id, score], index) => (
                 <li key={id} className={id === verdict.winner ? 'winner' : ''}>
-                  <span>{index + 1}</span><strong>{displayName(id)}</strong><b>{score}/{totalRounds * 10}</b>
+                  <span>{index + 1}</span><strong>{displayName(id)}</strong><b>{score} pts</b>
                 </li>
               ))}
             </ol>
@@ -403,6 +456,17 @@ function App() {
               <p className="arena-reveal">
                 Tonight’s AIs: <b>Jacques</b> was <code>{verdict.models.jacques}</code>, <b>Brad</b> was <code>{verdict.models.brad}</code>
               </p>
+            )}
+            {verdict.type && (
+              <div className="profile-card">
+                <p className="type-reveal">Clarissa’s secret type: <b>{verdict.type.label}</b></p>
+                {verdict.profile && <p className="rizz-profile"><b>{verdict.profile.title}</b> {verdict.profile.blurb}</p>}
+                {verdict.badges?.length > 0 && (
+                  <ul className="badges" aria-label="Badges">
+                    {verdict.badges.map((badge) => <li key={badge}>★ {badge}</li>)}
+                  </ul>
+                )}
+              </div>
             )}
           </div>
         )}
@@ -414,7 +478,7 @@ function App() {
               const active = revealId === id && !revealDone
               return (
                 <article key={id} className={`podium ${id === 'player' ? 'you' : ''} ${active ? 'active' : ''}`}>
-                  {shown && <span className="score-pop">+{result.scores[id]}</span>}
+                  {shown && <span className="score-pop">+{result.scores[id] + (result.bonus?.[id] || 0)}</span>}
                   <PixelSprite id={id} talking={talker === id} className="sprite-md" />
                   <div className="plate">
                     <strong>{displayName(id)}</strong>
@@ -445,8 +509,11 @@ function App() {
                     spellCheck={false}
                   />
                 </label>
-                <button className="pixel-btn big" onClick={startShow} disabled={busy}>
+                <button className="pixel-btn big" onClick={() => startShow()} disabled={busy}>
                   {busy ? 'Opening the villa…' : '▶ Press start'}
+                </button>
+                <button className="pixel-btn cyan" onClick={() => startShow(true)} disabled={busy}>
+                  ☀ Daily challenge
                 </button>
                 <div className="round-picker" role="radiogroup" aria-label="Number of questions">
                   {config.round_options.map((n) => (
@@ -486,6 +553,27 @@ function App() {
                   aria-label="Your answer"
                   autoFocus
                 />
+                {peek && (
+                  <p className="peek-card"><b>{CAST[peek.contestant].name} will say:</b> “{peek.answer}”</p>
+                )}
+                <div className="powerups" aria-label="Power-ups, one use each per show">
+                  <button type="button" className="power" onClick={peekAnswer} disabled={busy || used.includes('peek')} title="See one AI answer before you write yours">
+                    ◉ Peek
+                  </button>
+                  <button
+                    type="button"
+                    className={`power ${wink ? 'armed' : ''}`}
+                    onClick={() => { sfx('click'); setWink(!wink) }}
+                    disabled={busy || used.includes('wink')}
+                    aria-pressed={wink}
+                    title="Double points this round"
+                  >
+                    ♥ Wink ×2
+                  </button>
+                  <span className={`power static ${used.includes('rewrite') ? 'spent' : ''}`} title="After your score, edit your answer and get re-judged">
+                    ✎ Rewrite
+                  </span>
+                </div>
                 <div className="answer-footer">
                   <span>{answer.length}/280</span>
                   <button className="pixel-btn" type="submit" disabled={busy || !answer.trim()}>
@@ -502,8 +590,29 @@ function App() {
                   <Hearts value={result.scores[revealId]} label={`${result.scores[revealId]} out of 10`} />
                   <b>{result.scores[revealId]}/10</b>
                 </div>
-                <button className="pixel-btn" onClick={advanceReveal}>{allRevealed ? 'Tally up ▶' : 'Next answer ▶'}</button>
+                {result.bonus?.[revealId] > 0 && <span className="wink-tag">♥ ×2</span>}
+                {revealId === 'player' && !used.includes('rewrite') && !rewriting && (
+                  <button className="pixel-btn ghost" onClick={() => { sfx('click'); setRewriting(true) }}>✎ Rewrite</button>
+                )}
+                <button className="pixel-btn" onClick={advanceReveal} disabled={busy}>{allRevealed ? 'Tally up ▶' : 'Next answer ▶'}</button>
               </div>
+            )}
+
+            {rewriting && revealId === 'player' && !revealDone && (
+              <form className="answer-form rewrite" onSubmit={(event) => { event.preventDefault(); void submitRewrite() }}>
+                <textarea
+                  value={answer}
+                  onChange={(event) => setAnswer(event.target.value.slice(0, 280))}
+                  aria-label="Rewrite your answer"
+                  autoFocus
+                />
+                <div className="answer-footer">
+                  <span>One rewrite per show. New score replaces the old one.</span>
+                  <button className="pixel-btn" type="submit" disabled={busy || !answer.trim()}>
+                    {busy ? 'Re-judging…' : 'Re-judge me ♥'}
+                  </button>
+                </div>
+              </form>
             )}
 
             {revealDone && (
@@ -520,7 +629,7 @@ function App() {
 
             {phase === 'verdict' && (
               <div className="dialog-actions">
-                <button className="pixel-btn big" onClick={startShow} disabled={busy}>↻ Play again</button>
+                <button className="pixel-btn big" onClick={() => startShow(Boolean(game?.daily))} disabled={busy}>↻ Play again</button>
                 <button className="pixel-btn cyan" onClick={makeShareCard}>★ Share card</button>
                 <button className="pixel-btn ghost" onClick={showLeaderboard}>♛ Leaderboard</button>
               </div>
@@ -560,6 +669,12 @@ function App() {
               <a href="https://github.com/Tsaousis/rizztral" target="_blank" rel="noreferrer">Source on GitHub</a>
             </p>
             <p className="about-tip"><b>Tip:</b> be specific, be funny, and ask something back. Clarissa loves curiosity.</p>
+            <p>
+              <b>Her secret type:</b> every show Clarissa secretly prefers funny, poetic, nerdy, bold or sweet answers. Read her
+              reactions and thoughts for clues, then lean into it. <b>Power-ups</b>, once per show: Peek at an AI answer, Wink for
+              double points, or Rewrite your answer after you see the score. The <b>daily challenge</b> gives everyone the same five
+              questions and its own leaderboard.
+            </p>
           </section>
         </div>
       )}
@@ -588,22 +703,26 @@ function App() {
               <button role="tab" aria-selected={boardTab === 'humans'} className={`pick ${boardTab === 'humans' ? 'on' : ''}`} onClick={() => setBoardTab('humans')}>
                 Players
               </button>
+              <button role="tab" aria-selected={boardTab === 'today'} className={`pick ${boardTab === 'today' ? 'on' : ''}`} onClick={() => setBoardTab('today')}>
+                Today
+              </button>
               <button role="tab" aria-selected={boardTab === 'models'} className={`pick ${boardTab === 'models' ? 'on' : ''}`} onClick={() => setBoardTab('models')}>
                 AI models
               </button>
             </div>
-            {boardTab === 'humans' ? (
+            {boardTab !== 'models' ? (
               <>
-                {leaderboard.games > 0 && (
-                  <p className="versus">Humans {leaderboard.human_wins} · Machines {leaderboard.games - leaderboard.human_wins}</p>
+                {boardTab === 'today' && <p className="board-sub">Daily challenge · {board.daily} · same 5 questions for everyone</p>}
+                {board.games > 0 && (
+                  <p className="versus">Humans {board.human_wins} · Machines {board.games - board.human_wins}</p>
                 )}
-                {leaderboard.entries?.length ? leaderboard.entries.map((entry, index) => (
+                {board.entries?.length ? board.entries.map((entry, index) => (
                   <div className="leader-row" key={`${entry.name}-${entry.created_at}`}>
                     <span>{String(index + 1).padStart(2, '0')}</span>
                     <strong>{entry.name}</strong>
-                    <b>{entry.score}/{entry.max_score}</b>
+                    <b>{entry.score} <small>pts · {entry.max_score / 10}Q</small></b>
                   </div>
-                )) : <p>No roses handed out yet.</p>}
+                )) : <p>{boardTab === 'today' ? 'Nobody has played today’s challenge yet.' : 'No roses handed out yet.'}</p>}
               </>
             ) : (
               <>

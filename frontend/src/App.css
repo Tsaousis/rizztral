@@ -495,3 +495,29 @@ a.pixel-btn { display: inline-block; text-decoration: none; }
   .timer { width: 58px; height: 58px; }
   .pixel-btn.big { width: 100%; }
 }
+
+/* power-ups, secret type, profile */
+.powerups { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.power {
+  font: 700 14px var(--pixel); color: var(--cream); background: rgba(71, 234, 255, .12);
+  border: 2px solid var(--cyan); padding: 5px 10px; cursor: pointer; box-shadow: 3px 3px 0 rgba(0, 0, 0, .45);
+  transition: transform .12s steps(2), background .12s;
+}
+.power:hover:not(:disabled) { transform: translateY(-2px); background: rgba(71, 234, 255, .28); }
+.power.armed { background: var(--pink); border-color: var(--cream); animation: bob 1.2s steps(4) infinite; }
+.power:disabled, .power.spent { opacity: .38; cursor: not-allowed; text-decoration: line-through; }
+.power.static { cursor: help; border-style: dashed; }
+.peek-card {
+  margin: 8px 0 0; padding: 8px 12px; border: 2px dashed var(--cyan); background: rgba(20, 8, 41, .7);
+  font-family: 'DM Sans', system-ui, sans-serif; font-size: 14px;
+}
+.peek-card b { color: var(--cyan); font-family: var(--pixel); }
+.wink-tag { font: 700 16px var(--pixel); color: var(--cream); background: var(--pink); padding: 4px 8px; }
+.answer-form.rewrite { margin-top: 10px; }
+.profile-card { display: grid; gap: 6px; justify-items: center; max-width: 560px; }
+.type-reveal, .rizz-profile { margin: 0; padding: 6px 12px; background: rgba(20, 8, 41, .78); font-family: 'DM Sans', system-ui, sans-serif; }
+.type-reveal b { color: var(--pink); font-family: var(--pixel); font-size: 18px; }
+.rizz-profile b { color: var(--sun); font-family: var(--pixel); font-size: 18px; margin-right: 6px; }
+.badges { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.badges li { font: 700 13px var(--pixel); color: #140829; background: var(--cyan); padding: 4px 8px; box-shadow: 2px 2px 0 rgba(0, 0, 0, .5); }
+@media (prefers-reduced-motion: reduce) { .power.armed { animation: none; } }

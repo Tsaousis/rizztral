@@ -15,56 +15,58 @@ short_description: Can you out-rizz two AI contestants?
 
 ![Rizztral gameplay](docs/demo.gif)
 
-Rizztral is an AI dating show where Clarissa, an AI bachelorette, asks three or five questions and blindly
-scores your answers against two AI contestants. The highest total wins the final rose.
+Rizztral is an AI dating show where Clarissa, an AI bachelorette, asks three or five questions and
+scores every answer live: you against two AI contestants drawn from a cast of ten. The highest total
+wins the final rose.
 
-Built at the Mistral AI Game Jam in January 2025, where the original version placed 6th out of
-roughly 100 teams. This repository keeps the original premise and cast while replacing the retired
-Heroku and Render services with a single secure Docker application.
+## Based on the Mistral AI Game Jam project
+
+This is a rebuild of **Rizztral**, our team's entry to the
+[Mistral AI Game Jam](https://huggingface.co/Mistral-AI-Game-Jam) in January 2025, where it placed 6th
+out of roughly 100 teams. The original frontend is
+[Costopoulos/Rizztral](https://github.com/Costopoulos/Rizztral) and the jam build lives on the
+[original Hugging Face Space](https://huggingface.co/spaces/Mistral-AI-Game-Jam/Rizztral).
+This version keeps the premise, Clarissa and the original contestants Jacques and Brad, and replaces
+the retired Heroku and Render backends with a single secure Docker app, a new pixel-art look and new
+gameplay.
 
 ## Why we built it
 
-Rizztral was made for the Mistral AI Game Jam. It is meant to be fun, and it doubles as a small
-experiment in AI behaviour: can a language model flirt, read the room, and win the heart of another
-model? The blind judging lets you compare how humans and AIs do on charm, humour, and chemistry,
-and the leaderboard ranks a very niche skill: who has the most rizz, humans or machines.
+Rizztral is meant to be fun, and it doubles as a small experiment in AI behaviour: can a language
+model flirt, read the room, and win the heart of another model? The leaderboard ranks a very niche
+skill: who has the most rizz, humans or machines.
 
 ## How to play
 
-- **Secret type:** each show Clarissa secretly prefers funny, poetic, nerdy, bold or sweet answers.
-  Her reactions and thoughts drop hints; answers that fit score extra. The verdict reveals her type.
-- **Power-ups**, once per show: *Peek* at one AI answer before you write yours, *Wink* for double
+- **Live rounds:** Clarissa asks, then each contestant answers in turn and she reacts and scores them
+  straight away. The speaking order rotates every round, and one round per show is a roast round.
+- **Clarissa is a tough judge:** she loves short, playful, funny answers and marks down long,
+  serious or AI-sounding ones.
+- **Secret type:** each show she secretly prefers one type (funny, poetic, smart nerd, wild
+  adventurer, bad boy, tech tycoon or sweet). Her reactions drop hints; answers that fit score extra.
+- **Power-ups**, once per show: *Peek* at what an AI who speaks after you will say, *Wink* for double
   points this round, or *Rewrite* your answer after you see the score and get re-judged.
 - **Daily challenge:** everyone gets the same five questions and secret type for the day, ranked on
   the *Today* leaderboard.
-- **Rizz profile and badges:** the verdict gives you a profile (The Poet, Chaos Charmer, The Dry
-  Texter, ...) and badges such as Out-rizzed both AIs, Perfect 10, Type whisperer and Comeback kid.
+- **Verdict:** a "why you won / why you lost" breakdown with a plot twist, a rizz profile and badges,
+  and a shareable pixel result card.
 
 ## How it works
 
-- React and Vite render the show interface.
-- FastAPI serves the frontend and all API routes from one container.
-- Mistral is the recommended provider: set `MISTRAL_API_KEY` and the cheap defaults are
-  `mistral-small-latest` for Clarissa and Ministral 8B/3B for the contestants. OpenAI also works.
+- React and Vite render the show interface; FastAPI serves it and all API routes from one container.
+- OpenAI (`OPENAI_API_KEY`) or Mistral (`MISTRAL_API_KEY`) power the show. OpenAI defaults:
+  `gpt-5.4-mini` for Clarissa, with contestants drawn from `gpt-5.4-mini`, `gpt-5.4-nano` and
+  `gpt-5-mini`. Mistral defaults: `mistral-small-latest` and Ministral 8B/3B. Override with
+  `RIZZTRAL_MODEL_CLARISSA` and `RIZZTRAL_ARENA_MODELS`.
 - If the key is missing, expired, out of credits, or rate limited, the game falls back to its
   built-in show instead of failing, then retries the provider after two minutes.
 - Provider keys stay on the server and are never included in browser code.
-- Each round is blind judged: the human and AI answers are shuffled before Clarissa scores them.
-- The Rizz Meter and leaderboard use real scores returned by the backend.
-- Players choose a 3- or 5-question show.
-- The leaderboard has a Players tab and an AI models tab with the original Game Jam win rates
-  (which LLM rizzed a `mistral-large-latest` bachelorette best).
-- Enter a 3-letter arcade name, then share a pixel result card when the show ends.
-- Clarissa reacts to every score (heart eyes, blush, eye-roll) and shares one private thought per
-  round on why her favourite answer won.
-- Chiptune music and sound effects are generated in the browser with Web Audio; the mute button
-  is remembered.
-- Cast of ten: every show draws two AI rivals (Jacques, Brad, Amara, Kenji, Priya, Diego, Layla, Malik,
-  Mei, Bernard), each with their own pixel sprite and personality.
-- Live AI arena: each show draws its two contestant models from a pool (`RIZZTRAL_ARENA_MODELS`,
-  comma-separated; Mistral default `ministral-8b-latest`, `ministral-3b-latest`,
-  `mistral-small-latest`, `open-mistral-nemo`). Shows where the AI provider answered every call
-  count towards the live AI models leaderboard; built-in-show games never do.
+- Cast of ten AI rivals (Jacques, Brad, Amara, Kenji, Priya, Diego, Layla, Malik, Mei, Bernard), each
+  with their own pixel sprite and personality; two are drawn per show. They remember the show but only
+  call back to earlier answers in the roast round.
+- Live AI arena: shows where the AI provider answered every call count towards the AI models
+  leaderboard, next to the original Game Jam win rates. Built-in-show games never count.
+- Chiptune music and sound effects are generated in the browser with Web Audio.
 - Voice is off by default. The original Game Jam build used ElevenLabs; this version can speak
   through OpenAI TTS only when `RIZZTRAL_TTS=1` and an `OPENAI_API_KEY` are set.
 - Spend guard: at most `RIZZTRAL_MAX_AI_GAMES_PER_DAY` shows per day (default `40`, `0` = no cap)
@@ -75,7 +77,7 @@ and the leaderboard ranks a very niche skill: who has the most rizz, humans or m
 
 ```bash
 cp backend/.env.example backend/.env
-# Add MISTRAL_API_KEY (or OPENAI_API_KEY) to backend/.env
+# Add OPENAI_API_KEY (or MISTRAL_API_KEY) to backend/.env
 docker build -t rizztral .
 docker run --env-file backend/.env -p 7860:7860 rizztral
 ```
@@ -94,7 +96,7 @@ Demo mode uses built-in questions, contestant answers, scores, and verdicts. Voi
 
 This repository is ready for a Docker Space:
 
-1. Add `MISTRAL_API_KEY` (or `OPENAI_API_KEY`) under **Settings → Variables and secrets**.
+1. Add `OPENAI_API_KEY` (or `MISTRAL_API_KEY`) under **Settings → Variables and secrets**.
 2. Push the repository to the Space.
 3. Hugging Face builds the Dockerfile and serves the app on port `7860`.
 

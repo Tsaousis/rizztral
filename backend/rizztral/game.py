@@ -8,7 +8,7 @@ from collections import OrderedDict
 from dataclasses import dataclass, field
 
 from . import features, prompts
-from .cast import AI_IDS, ALL_CONTESTANT_IDS, CONTESTANTS
+from .cast import AI_IDS, ALL_CONTESTANT_IDS, CONTESTANTS, ROSTER, ROSTER_BY_ID
 from .config import Settings
 from .llm import LLM
 
@@ -60,7 +60,15 @@ class Game:
     type_id: str = "funny"
     daily: str | None = None
     powerups: dict[str, int] = field(default_factory=dict)
+    lineup: dict[str, str] = field(default_factory=lambda: {c["id"]: c["id"] for c in CONTESTANTS})
     ai_tasks: dict[int, asyncio.Task] = field(default_factory=dict)
+
+    def character(self, seat: str) -> dict:
+        return ROSTER_BY_ID[self.lineup[seat]]
+
+    @property
+    def names(self) -> dict[str, str]:
+        return {seat: self.character(seat)["name"] for seat in AI_IDS} | {"player": self.player_name}
 
     def totals(self) -> dict[str, int]:
         return {
@@ -142,6 +150,8 @@ class GameService:
         day = features.daily_key() if daily else None
         rng = features.daily_rng(day) if daily else self.rng
         type_id = rng.choice(sorted(features.TYPES))
+        lineup = dict(zip(AI_IDS, (c["id"] for c in rng.sample(ROSTER, len(AI_IDS)))))
+        names = [ROSTER_BY_ID[lineup[seat]]["name"] for seat in AI_IDS]
         if daily:
             n = max(self.settings.round_options)
             questions = rng.sample(prompts.QUESTION_BANK, n)
@@ -153,7 +163,7 @@ class GameService:
             try:
                 data = await self.llm.json(
                     self.settings.models["clarissa"],
-                    prompts.start_messages(player_name, n, self.rng),
+                    prompts.start_messages(player_name, n, self.rng, names),
                     temperature=0.95,
                 )
                 questions = [q.strip() for q in data.get("questions", []) if isinstance(q, str) and q.strip()]
@@ -179,6 +189,7 @@ class GameService:
             live=live,
             type_id=type_id,
             daily=day,
+            lineup=lineup,
         )
         self.games[game.id] = game
         while len(self.games) > self.settings.max_games:
@@ -201,13 +212,15 @@ class GameService:
             game.live = False
             return {cid: self._demo_answer(cid, question) for cid in AI_IDS}
 
-        async def one(contestant: dict) -> str:
-            cid = contestant["id"]
+        async def one(seat: str) -> str:
+            cid = seat
+            contestant = game.character(seat)
+            rival = next(game.names[other] for other in AI_IDS if other != seat)
             models = list(dict.fromkeys([game.contestant_models[cid], self.settings.models[cid]]))
             for model in models:
                 try:
                     answer = await self.llm.text(
-                        model, prompts.contestant_messages(contestant["persona"], question), temperature=0.9
+                        model, prompts.contestant_messages(contestant["persona"], question, rival), temperature=0.9
                     )
                 except Exception:
                     log.exception("AI provider failed during %s answer with %s", cid, model)
@@ -219,7 +232,7 @@ class GameService:
             game.live = False
             return self._demo_answer(cid, question)
 
-        answers = await asyncio.gather(*(one(c) for c in CONTESTANTS))
+        answers = await asyncio.gather(*(one(seat) for seat in AI_IDS))
         return dict(zip(AI_IDS, answers))
 
     async def ai_answers(self, game: Game, number: int) -> dict[str, str]:
@@ -250,7 +263,7 @@ class GameService:
         answers = {**(rnd.ai_answers or {}), "player": rnd.player_answer or "I don't know."}
         if self._ai(game):
             try:
-                await self._judge(rnd, answers, number, len(game.rounds), game.type_id)
+                await self._judge(rnd, answers, number, len(game.rounds), game.type_id, game.names)
                 return
             except Exception:
                 log.exception("AI provider failed during %s; using the built-in show", "judging")
@@ -290,7 +303,8 @@ class GameService:
         return rnd
 
     async def _judge(
-        self, rnd: Round, answers: dict[str, str], number: int, total: int, type_id: str = "funny"
+        self, rnd: Round, answers: dict[str, str], number: int, total: int, type_id: str = "funny",
+        names: dict[str, str] | None = None,
     ) -> None:
         ids = list(answers)
         self.rng.shuffle(ids)
@@ -310,14 +324,15 @@ class GameService:
         for label, cid in labels.items():
             entry = data.get(label) if isinstance(data.get(label), dict) else {}
             scores[cid] = clamp_score(entry.get("score"))
-            reaction = re.sub(r"\[[A-C]\][,:]?\s*", "", str(entry.get("reaction") or "Hmm. Next.")).strip()
-            reactions[cid] = reaction[:1].upper() + reaction[1:]
+            raw = str(entry.get("reaction") or "Hmm. Next.").strip()
+            reaction = re.sub(r"\[[A-C]\][,:]?\s*", "", raw).strip()
+            reactions[cid] = reaction[:1].upper() + reaction[1:] if reaction != raw else reaction
         rnd.scores, rnd.reactions = scores, reactions
         thought = str(data.get("thought") or "").strip()
         for label, cid in labels.items():
             thought = re.sub(
                 rf"(?:\b(?i:answer|contestant|option)\s+)?\[{label}\]|\b(?i:answer|contestant|option)\s+{label}\b",
-                NAMES[cid],
+                (names or NAMES)[cid],
                 thought,
             )
         rnd.thought = thought or demo_thought(scores)
@@ -393,13 +408,13 @@ class GameService:
         label = features.TYPES[game.type_id]["label"].lower()
         if winner == "player":
             why = (
-                f"You took {won_rounds} of {len(game.rounds)} rounds and beat {NAMES[rival]} by {gap} pts. "
+                f"You took {won_rounds} of {len(game.rounds)} rounds and beat {game.names[rival]} by {gap} pts. "
                 f"Round {best_n} sealed it: {pts(best, 'player')} pts."
             )
         else:
             why = (
-                f"{NAMES[winner]} beat you by {gap} pts. Round {swing_n} hurt most: "
-                f"{NAMES[rival]} got {pts(swing, rival)}, you got {pts(swing, 'player')}."
+                f"{game.names[winner]} beat you by {gap} pts. Round {swing_n} hurt most: "
+                f"{game.names[rival]} got {pts(swing, rival)}, you got {pts(swing, 'player')}."
             )
         if matched:
             twist = f"Plot twist: she was secretly into {label} answers, and {matched} of yours hit her type."
@@ -418,8 +433,7 @@ class GameService:
         lines = []
         for i, r in enumerate(game.rounds, start=1):
             scores = ", ".join(
-                f"{NAMES.get(cid, game.player_name) if cid != 'player' else game.player_name} "
-                f"{r.scores.get(cid, 0) + r.bonus.get(cid, 0)}"
+                f"{game.names[cid]} {r.scores.get(cid, 0) + r.bonus.get(cid, 0)}"
                 for cid in ALL_CONTESTANT_IDS
             )
             lines.append(f'Round {i} "{r.question}": {scores}. {game.player_name} said: "{(r.player_answer or "")[:160]}"')
@@ -433,7 +447,7 @@ class GameService:
         winner = self.winner(game)
         best = max(game.rounds, key=lambda r: r.scores.get(winner, 0))
         best_answer = best.player_answer if winner == "player" else (best.ai_answers or {}).get(winner, "")
-        winner_name = game.player_name if winner == "player" else NAMES[winner]
+        winner_name = game.names[winner]
         speech = ""
         breakdown = self.breakdown(game, winner)
         if self._ai(game):
@@ -470,6 +484,7 @@ class GameService:
             "profile": features.profile([r.player_answer or "" for r in game.rounds]),
             "badges": self.badges(game, winner),
             "breakdown": breakdown,
+            "lineup": dict(game.lineup),
             "daily": game.daily,
             "models": dict(game.contestant_models) if game.live else None,
         }

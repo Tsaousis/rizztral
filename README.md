@@ -59,7 +59,9 @@ and the leaderboard ranks a very niche skill: who has the most rizz, humans or m
   round on why her favourite answer won.
 - Chiptune music and sound effects are generated in the browser with Web Audio; the mute button
   is remembered.
-- Live AI arena: each show draws Jacques and Brad from a pool of models (`RIZZTRAL_ARENA_MODELS`,
+- Cast of ten: every show draws two AI rivals (Jacques, Brad, Amara, Kenji, Priya, Diego, Layla, Malik,
+  Mei, Bernard), each with their own pixel sprite and personality.
+- Live AI arena: each show draws its two contestant models from a pool (`RIZZTRAL_ARENA_MODELS`,
   comma-separated; Mistral default `ministral-8b-latest`, `ministral-3b-latest`,
   `mistral-small-latest`, `open-mistral-nemo`). Shows where the AI provider answered every call
   count towards the live AI models leaderboard; built-in-show games never do.

@@ -531,3 +531,7 @@ a.pixel-btn { display: inline-block; text-decoration: none; }
 .breakdown p { margin: 4px 0; }
 .breakdown ul { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 6px 0; padding: 0; list-style: none; font-variant-numeric: tabular-nums; }
 .breakdown .twist { color: var(--cyan); font-weight: 700; }
+
+.heard { display: grid; gap: 4px; margin-top: 6px; }
+.heard .peek-card { margin: 0; }
+.speak-order, .heard-wait { margin: 0; font: 700 13px var(--pixel); color: var(--cyan); letter-spacing: .5px; }

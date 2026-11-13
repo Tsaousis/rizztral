@@ -17,18 +17,32 @@ TYPES = {
         "fans": ("jacques",),
     },
     "nerdy": {
-        "label": "Nerdy",
-        "desc": "nerdy, curious answers: science, books, games, weird facts",
+        "label": "Smart nerd",
+        "desc": "nerdy, curious, clever answers: science, books, games, weird facts",
         "words": ("science", "space", "book", "code", "fact", "history", "math", "physics", "nerd", "game"),
         "hint": "Big brain energy is my weakness. Teach me something.",
         "fans": (),
     },
     "bold": {
-        "label": "Bold",
-        "desc": "bold, confident, spontaneous answers that take risks",
+        "label": "Wild adventurer",
+        "desc": "wild, spontaneous, adventurous answers that take risks",
         "words": ("dare", "adventure", "wild", "risk", "jump", "tonight", "fearless", "chaos", "spontaneous"),
         "hint": "I like someone who makes the first move.",
         "fans": ("brad",),
+    },
+    "bad_boy": {
+        "label": "Bad boy",
+        "desc": "cocky, confident, slightly dangerous, rule-breaking answers with swagger",
+        "words": ("trouble", "rules", "dangerous", "bike", "leather", "tattoo", "sneak", "rebel", "bad", "steal"),
+        "hint": "Tonight I'm in the mood for a little trouble.",
+        "fans": (),
+    },
+    "tycoon": {
+        "label": "Tech tycoon",
+        "desc": "big-ambition, rich-energy answers: empires, startups, private jets, power moves (Jensen Huang energy)",
+        "words": ("jet", "yacht", "billion", "million", "money", "startup", "company", "invest", "empire", "rich", "gpu"),
+        "hint": "Ambition is so attractive. Think bigger.",
+        "fans": (),
     },
     "sweet": {
         "label": "Sweet",
@@ -44,6 +58,8 @@ PROFILES = {
     "poetic": ("The Poet", "Talks in sunsets. Probably owns a notebook."),
     "nerdy": ("The Big Brain", "Flirts with facts. Somehow it works."),
     "bold": ("Chaos Charmer", "Zero hesitation, maximum plot."),
+    "bad_boy": ("The Bad Influence", "Trouble with a smile. Mothers worry."),
+    "tycoon": ("The Tycoon", "Pays in confidence. Accepts equity."),
     "sweet": ("The Golden Retriever", "Warm, loyal, impossible to dislike."),
 }
 

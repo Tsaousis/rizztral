@@ -184,3 +184,45 @@ def test_player_can_pick_five_questions(tmp_path, monkeypatch):
             c.post(f"/api/games/{gid}/rounds/{i}/answer", json={"answer": "hi"})
         assert c.post(f"/api/games/{gid}/verdict").status_code == 200
         assert c.get("/api/leaderboard").json()["entries"][0]["max_score"] == 50
+
+
+def test_arena_assigns_models_and_records_live_results(client):
+    gid, _, rounds = play(client, ["x"] * 3)
+    assert all(r["thought"] for r in rounds)
+    verdict = client.post(f"/api/games/{gid}/verdict").json()
+    assert verdict["live"] is True
+    models = verdict["models"]
+    assert set(models) == {"jacques", "brad"} and models["jacques"] != models["brad"]
+    assert {("text", m) for m in models.values()} <= set(client.llm.calls)
+    board = client.get("/api/leaderboard").json()["models"]
+    assert {row["model"] for row in board} == set(models.values())
+    assert sum(row["wins"] for row in board) == (verdict["winner"] != "player")
+
+
+def test_offline_games_do_not_count_for_models(tmp_path, monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("MISTRAL_API_KEY", raising=False)
+    settings = Settings(db_path=tmp_path / "db.sqlite", static_dir=tmp_path / "none")
+    with TestClient(create_app(settings, tts=False)) as c:
+        gid, _, rounds = play(c, ["We laugh together."] * 3)
+        assert all(r["thought"] for r in rounds)
+        verdict = c.post(f"/api/games/{gid}/verdict").json()
+        assert verdict["live"] is False and verdict["models"] is None
+        assert c.get("/api/leaderboard").json()["models"] == []
+
+
+def test_judge_thought_names_contestants_not_labels():
+    from rizztral.game import GameService, Round
+
+    class ThoughtLLM:
+        async def json(self, model, messages, temperature=0.7):
+            return {"A": {"score": 5}, "B": {"score": 6}, "C": {"score": 7}, "thought": "A bold [B] beat answer C."}
+
+    import asyncio
+    import random
+
+    service = GameService(Settings(), ThoughtLLM(), rng=random.Random(0))
+    rnd = Round(question="Q?")
+    asyncio.run(service._judge(rnd, {"jacques": "a", "brad": "b", "player": "c"}, 1, 3))
+    assert rnd.thought.startswith("A bold ")
+    assert "[" not in rnd.thought and "answer C" not in rnd.thought

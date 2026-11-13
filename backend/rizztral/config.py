@@ -7,6 +7,7 @@ PROVIDERS = {
         "base_url": None,
         "key_env": "OPENAI_API_KEY",
         "models": {"clarissa": "gpt-4.1", "jacques": "gpt-4.1-mini", "brad": "gpt-4o-mini"},
+        "arena": ["gpt-4.1-mini", "gpt-4o-mini", "gpt-4.1-nano"],
     },
     "mistral": {
         "base_url": "https://api.mistral.ai/v1",
@@ -16,6 +17,7 @@ PROVIDERS = {
             "jacques": "ministral-8b-latest",
             "brad": "ministral-3b-latest",
         },
+        "arena": ["ministral-8b-latest", "ministral-3b-latest", "mistral-small-latest", "open-mistral-nemo"],
     },
 }
 
@@ -71,6 +73,14 @@ class Settings:
             if override:
                 models[role] = override
         return models
+
+    @property
+    def arena_models(self) -> list[str]:
+        """Models the AI contestants are randomly drawn from, one per contestant per show."""
+        raw = os.getenv("RIZZTRAL_ARENA_MODELS")
+        if raw is not None:
+            return [m.strip() for m in raw.split(",") if m.strip()]
+        return list(PROVIDERS[self.provider]["arena"])
 
     @property
     def tts_enabled(self) -> bool:

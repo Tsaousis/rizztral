@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import random
+import re
 import secrets
 import time
 from collections import OrderedDict
@@ -13,7 +14,7 @@ from .llm import LLM
 
 PROVIDER_COOLDOWN_SECONDS = 120
 log = logging.getLogger("rizztral")
-NAMES = {c["id"]: c["name"] for c in CONTESTANTS}
+NAMES = {c["id"]: c["name"] for c in CONTESTANTS} | {"player": "the human"}
 DEMO_ANSWERS = {
     "jacques": [
         "I would turn it into a tiny poem, then pretend the moon helped me write the good parts.",
@@ -42,6 +43,7 @@ class Round:
     player_answer: str | None = None
     scores: dict[str, int] = field(default_factory=dict)
     reactions: dict[str, str] = field(default_factory=dict)
+    thought: str = ""
 
 
 @dataclass
@@ -52,6 +54,8 @@ class Game:
     rounds: list[Round]
     created_at: float = field(default_factory=time.time)
     verdict: dict | None = None
+    contestant_models: dict[str, str] = field(default_factory=dict)
+    live: bool = True
     ai_tasks: dict[int, asyncio.Task] = field(default_factory=dict)
 
     def totals(self) -> dict[str, int]:
@@ -60,6 +64,20 @@ class Game:
     @property
     def finished_rounds(self) -> int:
         return sum(1 for r in self.rounds if r.scores)
+
+
+THOUGHTS = {
+    "jacques": "Jacques went full poet again. Dramatic, a little much, and annoyingly effective.",
+    "brad": "Brad made it sound like an adventure. Chaotic, but I could actually picture the date.",
+    "player": "That one felt real. Less polished than the others, but it had an actual pulse.",
+}
+
+
+def demo_thought(scores: dict[str, int]) -> str:
+    if not scores:
+        return ""
+    best = max(scores, key=lambda cid: (scores[cid], cid == "player"))
+    return THOUGHTS.get(best, "")
 
 
 def clamp_score(value) -> int:
@@ -98,7 +116,7 @@ class GameService:
 
     async def start(self, player_name: str, rounds: int | None = None) -> Game:
         n = rounds or self.settings.rounds
-        questions, intro = None, None
+        questions, intro, live = None, None, True
         if not self.offline():
             try:
                 data = await self.llm.json(
@@ -114,6 +132,7 @@ class GameService:
                 log.exception("AI provider failed during %s; using the built-in show", "start")
                 self._mark_provider_down()
         if questions is None:
+            live = False
             questions = prompts.QUESTION_BANK[:n]
             intro = (
                 f"Welcome to the villa, {player_name}. Tonight I want wit, warmth, and one answer "
@@ -124,25 +143,34 @@ class GameService:
             player_name=player_name,
             intro=intro,
             rounds=[Round(question=q) for q in questions],
+            contestant_models=self._pick_models(),
+            live=live,
         )
         self.games[game.id] = game
         while len(self.games) > self.settings.max_games:
             self.games.popitem(last=False)
         return game
 
+    def _pick_models(self) -> dict[str, str]:
+        pool = list(dict.fromkeys(self.settings.arena_models))
+        if len(pool) < len(AI_IDS):
+            return {cid: self.settings.models[cid] for cid in AI_IDS}
+        return dict(zip(AI_IDS, self.rng.sample(pool, len(AI_IDS))))
+
     @staticmethod
     def _demo_answer(contestant_id: str, question: str) -> str:
         answers = DEMO_ANSWERS[contestant_id]
         return answers[sum(ord(char) for char in question) % len(answers)]
 
-    async def _generate_ai_answers(self, question: str) -> dict[str, str]:
+    async def _generate_ai_answers(self, game: Game, question: str) -> dict[str, str]:
         if self.offline():
+            game.live = False
             return {cid: self._demo_answer(cid, question) for cid in AI_IDS}
 
         async def one(contestant: dict) -> str:
             try:
                 answer = await self.llm.text(
-                    self.settings.models[contestant["id"]],
+                    game.contestant_models[contestant["id"]],
                     prompts.contestant_messages(contestant["persona"], question),
                     temperature=0.9,
                 )
@@ -151,6 +179,7 @@ class GameService:
             except Exception:
                 log.exception("AI provider failed during %s; using the built-in show", f"{contestant['id']} answer")
                 self._mark_provider_down()
+            game.live = False
             return self._demo_answer(contestant["id"], question)
 
         answers = await asyncio.gather(*(one(c) for c in CONTESTANTS))
@@ -161,7 +190,7 @@ class GameService:
         if rnd.ai_answers is None:
             task = game.ai_tasks.get(number)
             if task is None:
-                task = asyncio.ensure_future(self._generate_ai_answers(rnd.question))
+                task = asyncio.ensure_future(self._generate_ai_answers(game, rnd.question))
                 game.ai_tasks[number] = task
             rnd.ai_answers = await asyncio.shield(task)
         return rnd.ai_answers
@@ -183,6 +212,7 @@ class GameService:
             except Exception:
                 log.exception("AI provider failed during %s; using the built-in show", "judging")
                 self._mark_provider_down()
+        game.live = False
         self._demo_judge(rnd, player_answer)
         return rnd
 
@@ -203,6 +233,10 @@ class GameService:
             scores[cid] = clamp_score(entry.get("score"))
             reactions[cid] = str(entry.get("reaction") or "Hmm. Next.").strip()
         rnd.scores, rnd.reactions = scores, reactions
+        thought = str(data.get("thought") or "").strip()
+        for label, cid in labels.items():
+            thought = re.sub(rf"\[{label}\]|\b(?i:answer|contestant|option)\s+{label}\b", NAMES[cid], thought)
+        rnd.thought = thought or demo_thought(scores)
 
     @staticmethod
     def _demo_judge(rnd: Round, player_answer: str) -> None:
@@ -222,6 +256,7 @@ class GameService:
             else:
                 reaction = "That answer arrived, technically. The chemistry did not."
             rnd.reactions[contestant_id] = reaction
+        rnd.thought = demo_thought(rnd.scores)
 
     def winner(self, game: Game) -> str:
         totals = game.totals()
@@ -261,5 +296,7 @@ class GameService:
             "winner": winner,
             "speech": speech,
             "totals": game.totals(),
+            "live": game.live,
+            "models": dict(game.contestant_models) if game.live else None,
         }
         return game.verdict

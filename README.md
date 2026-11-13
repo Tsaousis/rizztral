@@ -13,7 +13,9 @@ short_description: Can you out-rizz two AI contestants?
 
 **One human. Two models. One final rose.**
 
-Rizztral is an AI dating show where Clarissa, an AI bachelorette, asks three questions and blindly
+![Rizztral gameplay](docs/demo.gif)
+
+Rizztral is an AI dating show where Clarissa, an AI bachelorette, asks three or five questions and blindly
 scores your answers against two AI contestants. The highest total wins the final rose.
 
 Built at the Mistral AI Game Jam in January 2025, where the original version placed 6th out of
@@ -41,6 +43,15 @@ and the leaderboard ranks a very niche skill: who has the most rizz, humans or m
 - Players choose a 3- or 5-question show.
 - The leaderboard has a Players tab and an AI models tab with the original Game Jam win rates
   (which LLM rizzed a `mistral-large-latest` bachelorette best).
+- Enter a 3-letter arcade name, then share a pixel result card when the show ends.
+- Clarissa reacts to every score (heart eyes, blush, eye-roll) and shares one private thought per
+  round on why her favourite answer won.
+- Chiptune music and sound effects are generated in the browser with Web Audio; the mute button
+  is remembered.
+- Live AI arena: each show draws Jacques and Brad from a pool of models (`RIZZTRAL_ARENA_MODELS`,
+  comma-separated; Mistral default `ministral-8b-latest`, `ministral-3b-latest`,
+  `mistral-small-latest`, `open-mistral-nemo`). Shows where the AI provider answered every call
+  count towards the live AI models leaderboard; built-in-show games never do.
 - Voice is off by default. The original Game Jam build used ElevenLabs; this version only speaks
   through OpenAI TTS when an `OPENAI_API_KEY` is set, otherwise the cast speaks in text.
 
@@ -87,6 +98,11 @@ python -m pip install -r requirements-dev.txt
 python -m pytest -q
 ruff check .
 ```
+
+## Credits
+
+Made at the Mistral AI Game Jam by [Costo](https://github.com/Costopoulos),
+[Costas](https://github.com/Tsaousis) and [jlexternal](https://github.com/jlexternal).
 
 ## Security
 

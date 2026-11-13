@@ -56,6 +56,7 @@ def round_payload(game: Game, number: int) -> dict:
         "answers": answers,
         "scores": rnd.scores,
         "reactions": rnd.reactions,
+        "thought": rnd.thought,
         "totals": game.totals(),
     }
 
@@ -137,6 +138,10 @@ def create_app(settings: Settings | None = None, llm: LLM | None = None, tts: TT
         leaderboard.record(
             game.id, game.player_name, totals["player"], 10 * len(game.rounds), result["winner"] == "player"
         )
+        if result["models"]:
+            leaderboard.record_models(
+                game.id, {model: result["winner"] == cid for cid, model in result["models"].items()}
+            )
         return result
 
     @app.get("/api/leaderboard")

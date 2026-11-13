@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import PixelSprite from './PixelSprite.jsx'
+import { renderShareCard } from './share.js'
+import { isMuted, setMuted, sfx, startMusic, stopMusic } from './sound.js'
 import './App.css'
 
 const CAST = {
@@ -13,6 +15,7 @@ const SPEAKERS = {
   jacques: 'Jacques',
   brad: 'Brad',
   player: 'You',
+  thought: 'Inside Clarissa’s head',
 }
 const REVEAL_ORDER = ['jacques', 'brad', 'player']
 const JAM_MODELS = [
@@ -26,6 +29,9 @@ const JAM_MODELS = [
   ['Step-2-16K-Exp', 48],
   ['o1-mini', 45],
 ]
+const NAME_KEY = 'rizztral-name'
+const cleanName = (value) => value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3)
+const moodFor = (score) => (score >= 9 ? 'love' : score >= 6 ? 'blush' : score <= 3 ? 'meh' : null)
 const LOBBY_LINE =
   "Welcome to Rizztral! Tonight, one human and two AIs fight for Clarissa's heart. Pick three or five questions. Blind judging, one rose."
 
@@ -110,6 +116,11 @@ function App() {
   const [error, setError] = useState('')
   const [audioTalking, setAudioTalking] = useState(false)
   const [aboutOpen, setAboutOpen] = useState(false)
+  const [name, setName] = useState(() => cleanName(localStorage.getItem(NAME_KEY) || ''))
+  const [muted, setMutedState] = useState(isMuted)
+  const [share, setShare] = useState(null)
+  const playerName = name || 'YOU'
+  const displayName = (id) => (id === 'player' ? playerName : CAST[id].name)
 
   useEffect(() => {
     request('/config').then(setConfig).catch(() => {})
@@ -140,13 +151,24 @@ function App() {
     [config.tts],
   )
 
+  const toggleMute = () => {
+    setMuted(!muted)
+    setMutedState(!muted)
+    if (!muted) stopMusic()
+    else startMusic()
+  }
+
   const startShow = async () => {
+    sfx('start')
+    startMusic()
+    localStorage.setItem(NAME_KEY, name)
+    setShare(null)
     setBusy(true)
     setError('')
     try {
       const data = await request('/games', {
         method: 'POST',
-        body: JSON.stringify({ player_name: 'You', rounds: roundCount }),
+        body: JSON.stringify({ player_name: playerName, rounds: roundCount }),
       })
       setGame(data)
       setHistory([])
@@ -219,6 +241,7 @@ function App() {
       setVerdict(data)
       setTotals(data.totals)
       setPhase('verdict')
+      sfx(data.winner === 'player' ? 'rose' : 'lose')
       void speak(data.speech, 'clarissa')
     } catch (err) {
       setError(err.message)
@@ -251,13 +274,49 @@ function App() {
     if (phase === 'lobby') return { speaker: 'marvey', text: LOBBY_LINE }
     if (phase === 'intro') return { speaker: 'clarissa', text: game?.intro }
     if (phase === 'answering') return { speaker: 'clarissa', text: game?.questions[roundNumber - 1] }
-    if (revealDone) return { speaker: 'clarissa', text: 'All three answers are in. Who is rizzing hardest?' }
+    if (revealDone) return { speaker: 'thought', text: result.thought || 'All three answers are in. Who is rizzing hardest?' }
     if (revealing) return { speaker: revealId, text: result.answers[revealId] }
     if (phase === 'verdict') return { speaker: 'clarissa', text: verdict?.speech }
     return { speaker: 'marvey', text: '' }
   }, [phase, game, roundNumber, revealing, revealDone, revealId, result, verdict])
 
   const typed = useTypewriter(line.text)
+  const revealScore = revealing && !revealDone ? result.scores[revealId] : null
+  const scoreShown = revealScore !== null && typed.done
+  const clarissaMood = scoreShown ? moodFor(revealScore) : null
+
+  useEffect(() => {
+    if (scoreShown) sfx('heart', revealScore)
+  }, [scoreShown, revealScore, revealId])
+
+  useEffect(() => {
+    if (phase === 'answering' && seconds > 0 && seconds <= 10) sfx('tick')
+  }, [phase, seconds])
+
+  const makeShareCard = async () => {
+    const totalsNow = verdict.totals
+    const card = await renderShareCard({
+      name: playerName,
+      score: totalsNow.player,
+      max: totalRounds * 10,
+      won: verdict.winner === 'player',
+      winnerId: verdict.winner,
+      winnerName: displayName(verdict.winner),
+      beaten: ['jacques', 'brad'].filter((id) => totalsNow[id] < totalsNow.player).length,
+    })
+    setShare(card)
+  }
+
+  const shareCard = async () => {
+    const file = new File([share.blob], 'rizztral.png', { type: 'image/png' })
+    const text = `I scored ${verdict.totals.player}/${totalRounds * 10} on Rizztral. Can you out-rizz the machines?`
+    if (navigator.canShare?.({ files: [file] })) {
+      await navigator.share({ files: [file], text, url: window.location.origin }).catch(() => {})
+    } else {
+      await navigator.clipboard?.writeText(`${text} ${window.location.origin}`).catch(() => {})
+      setError('Link copied. Paste it anywhere.')
+    }
+  }
   const talker = !typed.done || audioTalking ? line.speaker : null
   const completedRounds = history.length
   const playerRounds = revealing && !revealDone ? completedRounds - 1 : completedRounds
@@ -296,6 +355,9 @@ function App() {
         <button className="fab fab-cyan" onClick={() => setAboutOpen(true)} aria-label="About Rizztral">
           <span aria-hidden="true">?</span><em>About</em>
         </button>
+        <button className={`fab fab-sun ${muted ? 'off' : ''}`} onClick={toggleMute} aria-label={muted ? 'Turn sound on' : 'Mute sound'} aria-pressed={!muted}>
+          <span aria-hidden="true">{muted ? '×' : '♪'}</span><em>{muted ? 'Muted' : 'Sound'}</em>
+        </button>
       </nav>
 
       <section className="stage">
@@ -312,7 +374,9 @@ function App() {
 
         {phase !== 'lobby' && phase !== 'verdict' && (
           <div className="judge-spot">
-            <PixelSprite id="clarissa" talking={talker === 'clarissa'} className="sprite-xl holo bob" label="Clarissa" />
+            <PixelSprite id="clarissa" talking={talker === 'clarissa'} mood={clarissaMood} className="sprite-xl holo bob" label="Clarissa" />
+            {clarissaMood && <span className={`mood-pop mood-${clarissaMood}`} aria-hidden="true">{clarissaMood === 'meh' ? '…' : '♥'}</span>}
+            {line.speaker === 'thought' && <span className="think-bubble" aria-hidden="true"><i /><i /><i /></span>}
             {phase === 'answering' && (
               <div className={`timer ${seconds <= 10 ? 'urgent' : ''}`} aria-label={`${seconds} seconds left`}>
                 <b>{seconds}</b><span>sec</span>
@@ -324,17 +388,22 @@ function App() {
         {phase === 'verdict' && verdict && (
           <div className="verdict-stage">
             <div className="rose-burst" aria-hidden="true" />
-            <PixelSprite id={verdict.winner} talking={false} className="sprite-xxl bob" label={CAST[verdict.winner].name} />
+            <PixelSprite id={verdict.winner} talking={false} className="sprite-xxl bob" label={displayName(verdict.winner)} />
             <h2 className="winner-title">
-              {verdict.winner === 'player' ? 'You got the rose!' : `${CAST[verdict.winner].name} got the rose`}
+              {verdict.winner === 'player' ? `${playerName} got the rose!` : `${CAST[verdict.winner].name} got the rose`}
             </h2>
             <ol className="final-scores">
               {sortedScores.map(([id, score], index) => (
                 <li key={id} className={id === verdict.winner ? 'winner' : ''}>
-                  <span>{index + 1}</span><strong>{CAST[id].name}</strong><b>{score}/{totalRounds * 10}</b>
+                  <span>{index + 1}</span><strong>{displayName(id)}</strong><b>{score}/{totalRounds * 10}</b>
                 </li>
               ))}
             </ol>
+            {verdict.models && (
+              <p className="arena-reveal">
+                Tonight’s AIs: <b>Jacques</b> was <code>{verdict.models.jacques}</code>, <b>Brad</b> was <code>{verdict.models.brad}</code>
+              </p>
+            )}
           </div>
         )}
 
@@ -348,7 +417,7 @@ function App() {
                   {shown && <span className="score-pop">+{result.scores[id]}</span>}
                   <PixelSprite id={id} talking={talker === id} className="sprite-md" />
                   <div className="plate">
-                    <strong>{CAST[id].name}</strong>
+                    <strong>{displayName(id)}</strong>
                     <b>{totals[id]}</b>
                   </div>
                 </article>
@@ -360,9 +429,22 @@ function App() {
 
       <section className="console">
         {line.text && (
-          <Dialog speaker={line.speaker} text={typed.shown} done={typed.done} onSkip={typed.skip} tone={line.speaker === 'player' ? 'you' : ''}>
+          <Dialog speaker={line.speaker} text={typed.shown} done={typed.done} onSkip={typed.skip} tone={line.speaker === 'player' ? 'you' : line.speaker === 'thought' ? 'thought' : ''}>
             {phase === 'lobby' && (
               <div className="dialog-actions">
+                <label className="name-entry">
+                  <span>Enter name</span>
+                  <input
+                    value={name}
+                    onChange={(event) => setName(cleanName(event.target.value))}
+                    onKeyDown={(event) => event.key === 'Enter' && !busy && startShow()}
+                    placeholder="YOU"
+                    maxLength={3}
+                    aria-label="Your 3-letter arcade name"
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
+                </label>
                 <button className="pixel-btn big" onClick={startShow} disabled={busy}>
                   {busy ? 'Opening the villa…' : '▶ Press start'}
                 </button>
@@ -439,6 +521,7 @@ function App() {
             {phase === 'verdict' && (
               <div className="dialog-actions">
                 <button className="pixel-btn big" onClick={startShow} disabled={busy}>↻ Play again</button>
+                <button className="pixel-btn cyan" onClick={makeShareCard}>★ Share card</button>
                 <button className="pixel-btn ghost" onClick={showLeaderboard}>♛ Leaderboard</button>
               </div>
             )}
@@ -458,7 +541,7 @@ function App() {
             <h2>What is Rizztral?</h2>
             <p>
               A pixel dating show where one human and two AI contestants compete for the heart of Clarissa,
-              an AI bachelorette. She asks three questions and scores every answer blind, so she never knows who is human.
+              an AI bachelorette. She asks three or five questions and scores every answer blind, so she never knows who is human.
             </p>
             <p>
               It is meant to be fun, and it is also a small experiment: can a language model flirt, read the room,
@@ -466,7 +549,31 @@ function App() {
             </p>
             <p>The leaderboard tracks the most niche skill on the internet: who has the most rizz, humans or machines.</p>
             <p>Voice is switched off in this version, so the cast speaks in text. The original Game Jam build used ElevenLabs voices.</p>
+            <p>
+              Live arena: with a Mistral key, Jacques and Brad are played by different models each show, and the
+              AI models leaderboard counts which ones win Clarissa over.
+            </p>
+            <p className="credits">
+              Made by <a href="https://github.com/Costopoulos" target="_blank" rel="noreferrer">Costo</a>,{' '}
+              <a href="https://github.com/Tsaousis" target="_blank" rel="noreferrer">Costas</a> and{' '}
+              <a href="https://github.com/jlexternal" target="_blank" rel="noreferrer">jlexternal</a> ·{' '}
+              <a href="https://github.com/Tsaousis/rizztral" target="_blank" rel="noreferrer">Source on GitHub</a>
+            </p>
             <p className="about-tip"><b>Tip:</b> be specific, be funny, and ask something back. Clarissa loves curiosity.</p>
+          </section>
+        </div>
+      )}
+
+      {share && (
+        <div className="modal-backdrop" onClick={() => setShare(null)}>
+          <section className="leaderboard-modal share-modal" role="dialog" aria-label="Share your result" onClick={(event) => event.stopPropagation()}>
+            <button className="close-button" onClick={() => setShare(null)} aria-label="Close">×</button>
+            <p className="insert-coin">★ Brag responsibly ★</p>
+            <img src={share.url} alt="Your Rizztral result card" />
+            <div className="dialog-actions">
+              <a className="pixel-btn" href={share.url} download="rizztral.png">⬇ Download</a>
+              <button className="pixel-btn cyan" onClick={shareCard}>↗ Share</button>
+            </div>
           </section>
         </div>
       )}
@@ -500,6 +607,19 @@ function App() {
               </>
             ) : (
               <>
+                <h3 className="board-sub">Live arena</h3>
+                {leaderboard.models?.length ? leaderboard.models.map((row, index) => {
+                  const win = Math.round((100 * row.wins) / row.games)
+                  return (
+                    <div className="leader-row model-row" key={row.model}>
+                      <span>{String(index + 1).padStart(2, '0')}</span>
+                      <strong>{row.model}</strong>
+                      <b>{win}% <small>of {row.games}</small></b>
+                      <i className="win-bar" style={{ '--win': `${win}%` }} aria-hidden="true" />
+                    </div>
+                  )
+                }) : <p className="board-note">No live shows yet. Games played with the AI switched on count here.</p>}
+                <h3 className="board-sub">Game Jam 2025</h3>
                 <p className="board-note">Which LLM rizzes our bachelorette best? Win rates from the Mistral AI Game Jam, judged by mistral-large-latest.</p>
                 {JAM_MODELS.map(([model, win], index) => (
                   <div className="leader-row model-row" key={model}>

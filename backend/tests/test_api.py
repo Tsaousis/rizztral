@@ -218,7 +218,7 @@ def test_judge_thought_names_contestants_not_labels():
 
     class ThoughtLLM:
         async def json(self, model, messages, temperature=0.7):
-            return {"A": {"score": 5}, "B": {"score": 6}, "C": {"score": 7}, "thought": "A bold [B] beat answer C."}
+            return {"A": {"score": 5}, "B": {"score": 6}, "C": {"score": 7}, "thought": "A bold [B] beat answer C and Answer [A]."}
 
     import asyncio
     import random
@@ -227,7 +227,7 @@ def test_judge_thought_names_contestants_not_labels():
     rnd = Round(question="Q?")
     asyncio.run(service._judge(rnd, {"jacques": "a", "brad": "b", "player": "c"}, 1, 3))
     assert rnd.thought.startswith("A bold ")
-    assert "[" not in rnd.thought and "answer C" not in rnd.thought
+    assert "[" not in rnd.thought and "answer C" not in rnd.thought and "Answer" not in rnd.thought
 
 
 def test_powerups_peek_wink_rewrite_once_each(client):
@@ -312,3 +312,19 @@ def test_tts_is_opt_in(monkeypatch):
     assert Settings().tts_enabled is False
     monkeypatch.setenv("RIZZTRAL_TTS", "1")
     assert Settings().tts_enabled is True
+
+
+def test_broken_arena_model_falls_back_to_default_model(client, monkeypatch):
+    original = client.llm.text
+
+    async def text(model, messages, temperature=0.8):
+        if model == "retired-model":
+            raise RuntimeError("model deprecated")
+        return await original(model, messages, temperature)
+
+    monkeypatch.setattr(client.llm, "text", text)
+    monkeypatch.setenv("RIZZTRAL_ARENA_MODELS", "retired-model,gpt-4o-mini")
+    gid, _, _ = play(client, ["a fun long answer", "x", "y"])
+    verdict = client.post(f"/api/games/{gid}/verdict").json()
+    assert verdict["live"] is True
+    assert "retired-model" not in verdict["models"].values()

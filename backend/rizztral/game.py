@@ -202,19 +202,22 @@ class GameService:
             return {cid: self._demo_answer(cid, question) for cid in AI_IDS}
 
         async def one(contestant: dict) -> str:
-            try:
-                answer = await self.llm.text(
-                    game.contestant_models[contestant["id"]],
-                    prompts.contestant_messages(contestant["persona"], question),
-                    temperature=0.9,
-                )
+            cid = contestant["id"]
+            models = list(dict.fromkeys([game.contestant_models[cid], self.settings.models[cid]]))
+            for model in models:
+                try:
+                    answer = await self.llm.text(
+                        model, prompts.contestant_messages(contestant["persona"], question), temperature=0.9
+                    )
+                except Exception:
+                    log.exception("AI provider failed during %s answer with %s", cid, model)
+                    continue
                 if answer:
+                    game.contestant_models[cid] = model
                     return answer
-            except Exception:
-                log.exception("AI provider failed during %s; using the built-in show", f"{contestant['id']} answer")
-                self._mark_provider_down()
+            self._mark_provider_down()
             game.live = False
-            return self._demo_answer(contestant["id"], question)
+            return self._demo_answer(cid, question)
 
         answers = await asyncio.gather(*(one(c) for c in CONTESTANTS))
         return dict(zip(AI_IDS, answers))
@@ -311,7 +314,11 @@ class GameService:
         rnd.scores, rnd.reactions = scores, reactions
         thought = str(data.get("thought") or "").strip()
         for label, cid in labels.items():
-            thought = re.sub(rf"\[{label}\]|\b(?i:answer|contestant|option)\s+{label}\b", NAMES[cid], thought)
+            thought = re.sub(
+                rf"(?:\b(?i:answer|contestant|option)\s+)?\[{label}\]|\b(?i:answer|contestant|option)\s+{label}\b",
+                NAMES[cid],
+                thought,
+            )
         rnd.thought = thought or demo_thought(scores)
 
     @staticmethod

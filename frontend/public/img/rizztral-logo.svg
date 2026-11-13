@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 170" role="img" aria-labelledby="title">
+  <title id="title">Rizztral, AI dating show</title>
+  <defs>
+    <linearGradient id="neon" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ff2f91"/>
+      <stop offset=".52" stop-color="#ff82c1"/>
+      <stop offset="1" stop-color="#47eaff"/>
+    </linearGradient>
+    <filter id="glow" x="-40%" y="-60%" width="180%" height="220%">
+      <feGaussianBlur stdDeviation="7" result="blur"/>
+      <feFlood flood-color="#ff2f91" flood-opacity=".8"/>
+      <feComposite in2="blur" operator="in"/>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <g filter="url(#glow)">
+    <path d="M57 73C25 46 2 81 19 106l38 41 38-41c17-25-6-60-38-33Z" fill="none" stroke="url(#neon)" stroke-width="10" stroke-linejoin="round"/>
+    <path d="M24 43h19m28 0h19M57 10v20" stroke="#fff" stroke-width="7" stroke-linecap="round"/>
+    <text x="118" y="112" fill="white" font-family="Arial Black,Arial,sans-serif" font-size="88" font-style="italic" font-weight="900" letter-spacing="-6">RIZZTRAL</text>
+    <path d="M122 127h382" stroke="url(#neon)" stroke-width="5" stroke-linecap="round"/>
+    <circle cx="523" cy="127" r="7" fill="#47eaff"/>
+    <path d="M530 127h42l13-13h31" fill="none" stroke="#47eaff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <text x="122" y="157" fill="#ffd4eb" font-family="Arial,sans-serif" font-size="20" font-weight="700" letter-spacing="8">AI DATING SHOW</text>
+</svg>

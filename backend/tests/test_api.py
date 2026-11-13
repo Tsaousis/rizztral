@@ -47,7 +47,7 @@ def play(client, answers):
     gid = game["game_id"]
     rounds = []
     for i, answer in enumerate(answers, start=1):
-        assert client.post(f"/api/games/{gid}/rounds/{i}/prepare").json() == {"ready": True}
+        assert client.post(f"/api/games/{gid}/rounds/{i}/prepare").json()["ready"] is True
         rounds.append(client.post(f"/api/games/{gid}/rounds/{i}/answer", json={"answer": answer}).json())
     return gid, game, rounds
 
@@ -62,7 +62,8 @@ def test_config_hides_personas(client):
 def test_start_pads_missing_questions(client):
     game = client.post("/api/games", json={"player_name": "Costas"}).json()
     assert game["intro"] == "Hello boys."
-    assert len(game["questions"]) == 3 and game["questions"][:2] == ["Q1?", "Q2?"]
+    assert len(game["questions"]) == 3 and game["questions"][0] == "Q1?"
+    assert sum(q.startswith("Roast round") for q in game["questions"]) == 1
 
 
 def test_full_game_human_wins_and_hits_leaderboard(client):
@@ -94,10 +95,11 @@ def test_rounds_must_be_in_order_and_verdict_waits(client):
 def test_answer_is_truncated_and_ai_answers_cached(client):
     gid = client.post("/api/games", json={"player_name": "A"}).json()["game_id"]
     client.post(f"/api/games/{gid}/rounds/1/prepare")
-    before = sum(1 for kind, _ in client.llm.calls if kind == "text")
+    client.post(f"/api/games/{gid}/rounds/1/prepare")
     r = client.post(f"/api/games/{gid}/rounds/1/answer", json={"answer": "y" * 900}).json()
     assert len(r["answers"]["player"]) == 280
-    assert sum(1 for kind, _ in client.llm.calls if kind == "text") == before
+    client.post(f"/api/games/{gid}/rounds/1/answer", json={"answer": "again"})
+    assert sum(1 for kind, _ in client.llm.calls if kind == "text") == 2
 
 
 def test_validation(client):
@@ -276,7 +278,9 @@ def test_verdict_reveals_type_profile_and_badges(tmp_path, monkeypatch):
             rnd = demo.post(f"/api/games/{gid}/rounds/{i}/answer", json={"answer": "ok"}).json()
             assert rnd["thought"]
         verdict = demo.post(f"/api/games/{gid}/verdict").json()
-        assert verdict["type"]["label"] in {"Funny", "Poetic", "Nerdy", "Bold", "Sweet"}
+        from rizztral.features import TYPES
+
+        assert verdict["type"]["label"] in {t["label"] for t in TYPES.values()}
         assert verdict["profile"]["title"] == "The Dry Texter"
         assert isinstance(verdict["badges"], list)
 
@@ -355,3 +359,39 @@ def test_each_show_draws_two_roster_characters(client):
         seen.update(ids)
     assert len(seen) > 2
     assert len(client.get("/api/config").json()["cast"]["roster"]) == 10
+
+
+def test_speaking_order_rotates_and_later_speakers_hear_earlier_ones(client, monkeypatch):
+    heard = []
+    original = client.llm.text
+
+    async def text(model, messages, temperature=0.8):
+        heard.append(messages[-1]["content"])
+        return await original(model, messages, temperature)
+
+    monkeypatch.setattr(client.llm, "text", text)
+    gid = client.post("/api/games", json={"player_name": "KOS"}).json()["game_id"]
+    orders = []
+    for i in range(1, 4):
+        prep = client.post(f"/api/games/{gid}/rounds/{i}/prepare").json()
+        before = prep["order"][: prep["order"].index("player")]
+        assert set(prep["before"]) == set(before)
+        rnd = client.post(f"/api/games/{gid}/rounds/{i}/answer", json={"answer": f"zebra pun {i}"}).json()
+        assert rnd["order"] == prep["order"] and set(rnd["answers"]) == {"jacques", "brad", "player"}
+        orders.append(tuple(prep["order"]))
+    assert len(set(orders)) == 3 and {o.index("player") for o in orders} == {0, 1, 2}
+    assert any('KOS just said: "zebra pun' in h for h in heard)
+    assert any("Earlier in the show" in h and "zebra pun 1" in h for h in heard)
+
+
+def test_peek_only_targets_ais_after_the_player(client):
+    gid = client.post("/api/games", json={"player_name": "KOS"}).json()["game_id"]
+    for i in range(1, 4):
+        prep = client.post(f"/api/games/{gid}/rounds/{i}/prepare").json()
+        after = prep["order"][prep["order"].index("player") + 1 :]
+        res = client.post(f"/api/games/{gid}/rounds/{i}/peek")
+        if after:
+            assert res.status_code == 200 and res.json()["contestant"] in after
+            break
+        assert res.status_code == 409
+        client.post(f"/api/games/{gid}/rounds/{i}/answer", json={"answer": "x"})

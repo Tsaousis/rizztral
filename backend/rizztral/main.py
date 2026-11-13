@@ -62,6 +62,7 @@ def round_payload(game: Game, number: int) -> dict:
         "reactions": rnd.reactions,
         "thought": rnd.thought,
         "bonus": rnd.bonus,
+        "order": rnd.order,
         "powerups": sorted(game.powerups),
         "totals": game.totals(),
     }
@@ -137,8 +138,8 @@ def create_app(settings: Settings | None = None, llm: LLM | None = None, tts: TT
     @app.post("/api/games/{game_id}/rounds/{number}/prepare")
     async def prepare_round(game_id: str, number: int):
         game = service.get(game_id)
-        await guarded(service.ai_answers(game, number))
-        return {"ready": True}
+        before = await guarded(service.ai_answers(game, number))
+        return {"ready": True, "order": game.rounds[number - 1].order, "before": before}
 
     @app.post("/api/games/{game_id}/rounds/{number}/answer")
     async def answer_round(game_id: str, number: int, body: AnswerRequest):

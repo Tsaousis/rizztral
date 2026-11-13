@@ -45,11 +45,6 @@ class Round:
     reactions: dict[str, str] = field(default_factory=dict)
     thought: str = ""
     bonus: dict[str, int] = field(default_factory=dict)
-    order: list[str] = field(default_factory=lambda: list(ALL_CONTESTANT_IDS))
-
-    def seats_around_player(self) -> tuple[list[str], list[str]]:
-        i = self.order.index("player")
-        return self.order[:i], self.order[i + 1 :]
 
 
 @dataclass
@@ -155,7 +150,6 @@ class GameService:
         day = features.daily_key() if daily else None
         rng = features.daily_rng(day) if daily else self.rng
         type_id = rng.choice(sorted(features.TYPES))
-        shift = rng.randrange(3)
         lineup = dict(zip(AI_IDS, (c["id"] for c in rng.sample(ROSTER, len(AI_IDS)))))
         names = [ROSTER_BY_ID[lineup[seat]]["name"] for seat in AI_IDS]
         if daily:
@@ -190,10 +184,7 @@ class GameService:
             id=secrets.token_urlsafe(12),
             player_name=player_name,
             intro=intro,
-            rounds=[
-                Round(question=q, order=ALL_CONTESTANT_IDS[i % 3 :] + ALL_CONTESTANT_IDS[: i % 3])
-                for i, q in enumerate(self._with_roast(questions, rng), start=shift)
-            ],
+            rounds=[Round(question=q) for q in self._with_roast(questions, rng)],
             contestant_models=self._pick_models(),
             live=live,
             type_id=type_id,
@@ -224,68 +215,43 @@ class GameService:
         questions[len(questions) // 2] = rng.choice(prompts.ROAST_QUESTIONS)
         return questions
 
-    @staticmethod
-    def _transcript(game: Game, number: int) -> str:
-        lines = []
-        for i, r in enumerate(game.rounds[: number - 1], start=1):
-            said = "; ".join(
-                f'{game.names[cid]}: "{(r.player_answer if cid == "player" else (r.ai_answers or {}).get(cid, ""))[:140]}"'
-                for cid in r.order
-            )
-            lines.append(f'Round {i} "{r.question}" -> {said}')
-        return "\n".join(lines)
-
-    async def _ai_answer(self, game: Game, number: int, seat: str, heard: dict[str, str]) -> str:
-        rnd = game.rounds[number - 1]
+    async def _generate_ai_answers(self, game: Game, question: str) -> dict[str, str]:
         if not self._ai(game):
             game.live = False
-            return self._demo_answer(seat, rnd.question)
-        contestant = game.character(seat)
-        rival = next(game.names[other] for other in AI_IDS if other != seat)
-        messages = prompts.contestant_messages(
-            contestant["persona"],
-            rnd.question,
-            rival,
-            transcript=self._transcript(game, number),
-            heard=[(game.names[cid], text) for cid, text in heard.items()],
-            player_name=game.player_name,
-        )
-        for model in dict.fromkeys([game.contestant_models[seat], self.settings.models[seat]]):
-            try:
-                answer = await self.llm.text(model, messages, temperature=0.9)
-            except Exception:
-                log.exception("AI provider failed during %s answer with %s", seat, model)
-                continue
-            if answer:
-                game.contestant_models[seat] = model
-                return answer
-        self._mark_provider_down()
-        game.live = False
-        return self._demo_answer(seat, rnd.question)
+            return {cid: self._demo_answer(cid, question) for cid in AI_IDS}
 
-    async def _answer_in_order(self, game: Game, number: int, seats: list[str]) -> None:
-        rnd = game.rounds[number - 1]
-        for seat in rnd.order:
-            if seat in seats and seat not in rnd.ai_answers:
-                heard = {}
-                for cid in rnd.order[: rnd.order.index(seat)]:
-                    text = rnd.player_answer if cid == "player" else rnd.ai_answers.get(cid)
-                    if text is not None:
-                        heard[cid] = text
-                rnd.ai_answers[seat] = await self._ai_answer(game, number, seat, heard)
+        async def one(seat: str) -> str:
+            cid = seat
+            contestant = game.character(seat)
+            rival = next(game.names[other] for other in AI_IDS if other != seat)
+            models = list(dict.fromkeys([game.contestant_models[cid], self.settings.models[cid]]))
+            for model in models:
+                try:
+                    answer = await self.llm.text(
+                        model, prompts.contestant_messages(contestant["persona"], question, rival, game.player_name), temperature=0.9
+                    )
+                except Exception:
+                    log.exception("AI provider failed during %s answer with %s", cid, model)
+                    continue
+                if answer:
+                    game.contestant_models[cid] = model
+                    return answer
+            self._mark_provider_down()
+            game.live = False
+            return self._demo_answer(cid, question)
+
+        answers = await asyncio.gather(*(one(seat) for seat in AI_IDS))
+        return dict(zip(AI_IDS, answers))
 
     async def ai_answers(self, game: Game, number: int) -> dict[str, str]:
-        """Answers from the AIs who speak before the player this round."""
         rnd = self._round(game, number)
         if rnd.ai_answers is None:
-            rnd.ai_answers = {}
-        before, _ = rnd.seats_around_player()
-        task = game.ai_tasks.get(number)
-        if task is None:
-            task = asyncio.ensure_future(self._answer_in_order(game, number, before))
-            game.ai_tasks[number] = task
-        await asyncio.shield(task)
-        return {seat: rnd.ai_answers[seat] for seat in before}
+            task = game.ai_tasks.get(number)
+            if task is None:
+                task = asyncio.ensure_future(self._generate_ai_answers(game, rnd.question))
+                game.ai_tasks[number] = task
+            rnd.ai_answers = await asyncio.shield(task)
+        return rnd.ai_answers
 
     def _use_powerup(self, game: Game, name: str, number: int) -> None:
         if name in game.powerups:
@@ -293,17 +259,13 @@ class GameService:
         game.powerups[name] = number
 
     async def peek(self, game: Game, number: int) -> dict:
-        rnd = self._round(game, number)
+        self._round(game, number)
         if number != game.finished_rounds + 1:
             raise GameError(409, "You can only peek at the current round.")
-        await self.ai_answers(game, number)
-        _, after = rnd.seats_around_player()
-        if not after:
-            raise GameError(409, "Everyone already spoke before you this round.")
         self._use_powerup(game, "peek", number)
-        contestant = self.rng.choice(after)
-        await self._answer_in_order(game, number, [contestant])
-        return {"contestant": contestant, "answer": rnd.ai_answers[contestant]}
+        ai = await self.ai_answers(game, number)
+        contestant = self.rng.choice(AI_IDS)
+        return {"contestant": contestant, "answer": ai[contestant]}
 
     async def _score(self, game: Game, rnd: Round, number: int) -> None:
         answers = {**(rnd.ai_answers or {}), "player": rnd.player_answer or "I don't know."}
@@ -321,13 +283,13 @@ class GameService:
         rnd = self._round(game, number)
         if number != game.finished_rounds + 1:
             raise GameError(409, "Rounds must be played in order.")
-        await self.ai_answers(game, number)
+        ai = await self.ai_answers(game, number)
         if rnd.scores:
             return rnd
         if wink:
             self._use_powerup(game, "wink", number)
+        rnd.ai_answers = ai
         rnd.player_answer = answer.strip()[: self.settings.max_answer_chars]
-        await self._answer_in_order(game, number, AI_IDS)
         await self._score(game, rnd, number)
         if wink:
             rnd.bonus["player"] = rnd.scores["player"]
@@ -338,7 +300,7 @@ class GameService:
         if game.verdict or number != game.finished_rounds or not rnd.scores:
             raise GameError(409, "You can only rewrite the answer you just gave.")
         self._use_powerup(game, "rewrite", number)
-        retry = Round(question=rnd.question, ai_answers=rnd.ai_answers, order=rnd.order)
+        retry = Round(question=rnd.question, ai_answers=rnd.ai_answers)
         retry.player_answer = answer.strip()[: self.settings.max_answer_chars]
         await self._score(game, retry, number)
         rnd.player_answer = retry.player_answer

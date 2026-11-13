@@ -44,8 +44,28 @@ const MOUTHS = {
   open: { 13: '..........mmmm..........', 14: '..........mttm..........', 15: '...........mm...........' },
 }
 
+const MOODS = {
+  love: {
+    10: '........RsR..RsR........',
+    11: '........RRR..RRR........',
+    12: '.........R....R.........',
+    13: '.......bb......bb.......',
+  },
+  blush: {
+    10: '.........ss..ss.........',
+    11: '.........ee..ee.........',
+    13: '.......bbb....bbb.......',
+  },
+  meh: {
+    9: '........ooo..ooo........',
+    10: '.........ee..ee.........',
+    11: '.........ww..ww.........',
+    13: '........................',
+  },
+}
+
 const OUTLINE = '#2a0e4a'
-const COMMON = { o: OUTLINE, w: '#ffffff', e: OUTLINE }
+const COMMON = { o: OUTLINE, w: '#ffffff', e: OUTLINE, R: '#ff2f91' }
 
 const SPRITES = {
   clarissa: {
@@ -154,7 +174,7 @@ const SPRITES = {
   },
 }
 
-function compose(id, mouth) {
+export function spriteGrid(id, mouth = 'closed', mood = null) {
   const sprite = SPRITES[id]
   const colors = { ...COMMON, ...sprite.colors }
   const grid = BASE.map((row) => row.split(''))
@@ -170,7 +190,12 @@ function compose(id, mouth) {
   paint(MOUTHS[mouth])
   paint(Object.fromEntries(sprite.hair.map((row, y) => [y, row])))
   if (sprite.extra) paint(sprite.extra)
+  if (mood && MOODS[mood]) paint(MOODS[mood])
+  return { grid, colors }
+}
 
+function compose(id, mouth, mood) {
+  const { grid, colors } = spriteGrid(id, mouth, mood)
   const rects = []
   grid.forEach((row, y) => {
     let x = 0
@@ -186,14 +211,19 @@ function compose(id, mouth) {
   return rects
 }
 
-const FRAMES = Object.fromEntries(
-  Object.keys(SPRITES).map((id) => [id, Object.fromEntries(Object.keys(MOUTHS).map((m) => [m, compose(id, m)]))]),
-)
+const frameCache = new Map()
+function frames(id, mood) {
+  const key = `${id}:${mood || ''}`
+  if (!frameCache.has(key)) {
+    frameCache.set(key, Object.fromEntries(Object.keys(MOUTHS).map((m) => [m, compose(id, m, mood)])))
+  }
+  return frameCache.get(key)
+}
 
-export default function PixelSprite({ id, talking = false, className = '', label }) {
+export default function PixelSprite({ id, talking = false, mood = null, className = '', label }) {
   return (
-    <span className={`pixel-sprite sprite-${id} ${talking ? 'is-talking' : ''} ${className}`} role={label ? 'img' : undefined} aria-label={label} aria-hidden={label ? undefined : true}>
-      {Object.entries(FRAMES[id]).map(([mouth, rects]) => (
+    <span className={`pixel-sprite sprite-${id} ${talking ? 'is-talking' : ''} ${mood ? `mood-${mood}` : ''} ${className}`} role={label ? 'img' : undefined} aria-label={label} aria-hidden={label ? undefined : true}>
+      {Object.entries(frames(id, mood)).map(([mouth, rects]) => (
         <svg key={mouth} className={`frame frame-${mouth}`} viewBox={`0 0 ${W} ${BASE.length}`} shapeRendering="crispEdges">
           {rects}
         </svg>

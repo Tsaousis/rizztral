@@ -84,7 +84,7 @@ def create_app(settings: Settings | None = None, llm: LLM | None = None, tts: TT
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(settings.allowed_origins),
-        allow_origin_regex=r"https://[-a-z0-9]+\.hf\.space",
+        allow_origin_regex=r"https://[-a-z0-9]+(\.static)?\.hf\.space",
         allow_methods=["GET", "POST", "OPTIONS"],
         allow_headers=["Content-Type"],
     )

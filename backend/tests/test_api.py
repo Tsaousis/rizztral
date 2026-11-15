@@ -58,16 +58,20 @@ def test_config_hides_personas(client):
     assert [c["id"] for c in cfg["cast"]["contestants"]] == ["jacques", "brad", "player"]
 
 
-def test_hugging_face_static_space_can_call_api(client):
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "https://mistral-ai-game-jam-rizztral.hf.space",
+        "https://mistral-ai-game-jam-rizztral.static.hf.space",
+    ],
+)
+def test_hugging_face_static_space_can_call_api(client, origin):
     response = client.options(
         "/api/config",
-        headers={
-            "Origin": "https://mistral-ai-game-jam-rizztral.hf.space",
-            "Access-Control-Request-Method": "GET",
-        },
+        headers={"Origin": origin, "Access-Control-Request-Method": "GET"},
     )
     assert response.status_code == 200
-    assert response.headers["access-control-allow-origin"] == "https://mistral-ai-game-jam-rizztral.hf.space"
+    assert response.headers["access-control-allow-origin"] == origin
 
 
 def test_backend_only_root_identifies_api(client):

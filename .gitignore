@@ -8,3 +8,6 @@ venv/
 backend/data/
 .pytest_cache/
 .ruff_cache/
+
+# Local Dev
+**/.DS_Store

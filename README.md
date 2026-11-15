@@ -4,8 +4,7 @@ emoji: 💘
 colorFrom: pink
 colorTo: purple
 sdk: static
-app_build_command: cd frontend && npm ci && npm run build
-app_file: frontend/dist/index.html
+app_file: index.html
 pinned: false
 short_description: Can you out-rizz two AI contestants?
 ---
@@ -98,17 +97,25 @@ Demo mode uses built-in questions, contestant answers, scores, and verdicts. Voi
 
 ## Deploy
 
-The root `README.md` configures Hugging Face as a free static Space. It builds the React app without
-using a CPU slot. Add a public Space variable named `VITE_API_BASE` with the Render service URL, then
-push the repository to the Space. `frontend/public/config.js` is also available as a runtime override
-for hosts that cannot provide build variables.
+The Hugging Face Space hosts only the built frontend as a free static Space, so it needs no CPU slot or
+build credits. `frontend/public/config.js` points `*.hf.space` at the Render API. To publish, log in
+with a Hugging Face write token and run:
+
+```bash
+python3 -m pip install huggingface_hub
+python3 -c "from huggingface_hub import login; login()"
+scripts/deploy_space.sh
+```
+
+The script builds `frontend/dist`, adds the Space `README.md`, and replaces the Space files with that
+build.
 
 Deploy the API from the same repository with the Render Blueprint in `render.yaml`:
 
 1. In Render, choose **New → Blueprint** and connect this repository.
 2. Keep the free `rizztral-api` Web Service settings.
 3. Enter `OPENAI_API_KEY` (or replace it with `MISTRAL_API_KEY` and set `RIZZTRAL_PROVIDER=mistral`).
-4. After Render assigns the `onrender.com` URL, add it to the Hugging Face Space as `VITE_API_BASE`.
+4. If the Render URL changes, update it in `frontend/public/config.js`.
 
 The free Render filesystem is ephemeral, so the SQLite leaderboard can reset after a deploy or
 service replacement. Browsers keep the latest successful leaderboard as a read-only fallback.
